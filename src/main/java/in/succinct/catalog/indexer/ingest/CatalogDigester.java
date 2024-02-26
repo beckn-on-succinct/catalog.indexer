@@ -29,6 +29,7 @@ import in.succinct.beckn.Providers;
 import in.succinct.catalog.indexer.db.model.IndexedActivatableModel;
 import in.succinct.catalog.indexer.db.model.IndexedProviderModel;
 import in.succinct.catalog.indexer.db.model.ProviderLocation;
+import org.json.simple.JSONObject;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -193,26 +194,25 @@ public class CatalogDigester implements Task {
         if (items != null) {
             for (int j = 0; j < items.size(); j++) {
                 Item item = items.get(j);
-
-                for (String key : new String[]{"fulfillment_ids","location_ids","payment_ids"}){
-                    BecknStrings refIds = item.get(key) == null ? null : new BecknStrings(item.get(key));
-                    if (refIds == null){
-                        refIds = new BecknStrings();
-                        item.set(key,refIds);
-                        String singular = key.substring(0,key.length()-1);
-                        String refObjectId = item.get(singular);
-                        if (refObjectId != null){
-                            refIds.add(refObjectId);
-                            BecknObjectWithId becknObject = new BecknObjectWithId();
-                            becknObject.setId(refObjectId);
-                            ensureProviderModel(getModelClass(key),provider,active,becknObject);
-                        }
-                    }
-                    if (refIds.isEmpty()){
-                        refIds.add(null);
-                    }
+                if (item.getFulfillmentIds() == null) {
+                    item.setFulfillmentIds(new BecknStrings());
+                    item.getFulfillmentIds().add(item.getFulfillmentId());
                 }
-                for (String categoryId : new String[]{item.getCategoryId()}) {
+                if (item.getLocationIds() == null){
+                    item.setLocationIds(new BecknStrings());
+                    item.getLocationIds().add(item.getLocationId());
+                }
+
+                if (item.getPaymentIds() == null){
+                    item.setPaymentIds(new BecknStrings());
+                    item.getPaymentIds().add(null);
+                }
+                if (item.getCategoryIds() == null){
+                    item.setCategoryIds(new BecknStrings());
+                    item.getCategoryIds().add(item.getCategoryId());
+                }
+
+                for (String categoryId : item.getCategoryIds()) {
                     for (String locationId : item.getLocationIds()) {
                         for (String paymentId : item.getPaymentIds()) {
                             for (String fulfillmentId : item.getFulfillmentIds()) {
@@ -245,6 +245,8 @@ public class CatalogDigester implements Task {
     private <T extends Model & IndexedProviderModel>  T ensureProviderModel(Class<T> modelClass, in.succinct.catalog.indexer.db.model.Provider provider, boolean active, BecknObject becknObject){
         return ensureProviderModel(modelClass,provider,active,becknObject,null);
     }
+
+    @SuppressWarnings("unchecked")
     private <T extends Model & IndexedProviderModel, B extends BecknObject>  T ensureProviderModel(Class<T> modelClass, in.succinct.catalog.indexer.db.model.Provider provider, boolean active,
                                                                                                    B becknObject, Visitor<T,B> visitor){
         T model =  Database.getTable(modelClass).newRecord();
@@ -255,7 +257,6 @@ public class CatalogDigester implements Task {
         if (descriptor != null) {
             model.setObjectName(descriptor.getName());
         }
-        model.setObjectJson(becknObject.toString());
         if (model instanceof IndexedActivatableModel){
             ((IndexedActivatableModel)model).setActive(active);
         }
@@ -264,6 +265,13 @@ public class CatalogDigester implements Task {
         }
         Config.instance().getLogger(getClass().getName()).info("CatalogDigester: model saved: " + model.getRawRecord().toString());
         model = Database.getTable(modelClass).getRefreshed(model);
+
+        BecknObject finalObjectJson = new BecknObject();
+        if (!ObjectUtil.isVoid(model.getObjectJson())){
+            finalObjectJson = new BecknObject((JSONObject) BecknObject.parse(model.getObjectJson()));
+        }
+        finalObjectJson.getInner().putAll(becknObject.getInner()); //minimal
+        model.setObjectJson(finalObjectJson.getInner().toString());
         model.save();
         return model;
     }
