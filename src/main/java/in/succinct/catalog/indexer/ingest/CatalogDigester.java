@@ -171,7 +171,7 @@ public class CatalogDigester implements Task {
         if (fulfillments != null) {
             for (int j = 0; j < fulfillments.size(); j++) {
                 Fulfillment fulfillment = fulfillments.get(j);
-                in.succinct.catalog.indexer.db.model.Fulfillment model = ensureProviderModel(in.succinct.catalog.indexer.db.model.Fulfillment.class, provider, active, fulfillment,(fulfillmentModel, fulfillmentBecknObject) -> fulfillmentModel.setObjectName(fulfillmentBecknObject.getType().toString()));
+                in.succinct.catalog.indexer.db.model.Fulfillment model = ensureProviderModel(in.succinct.catalog.indexer.db.model.Fulfillment.class, provider, active, fulfillment,(fulfillmentModel, fulfillmentBecknObject) -> fulfillmentModel.setObjectName(fulfillmentBecknObject.getType()));
                 fulfillmentMap.put(model.getObjectId(), model);
             }
         }
