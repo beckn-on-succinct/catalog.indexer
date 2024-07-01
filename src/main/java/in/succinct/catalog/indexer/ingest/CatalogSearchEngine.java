@@ -2,7 +2,6 @@ package in.succinct.catalog.indexer.ingest;
 
 import com.venky.cache.Cache;
 import com.venky.core.string.StringUtil;
-import com.venky.core.util.Bucket;
 import com.venky.core.util.ObjectUtil;
 import com.venky.swf.db.Database;
 import com.venky.swf.db.model.Model;
@@ -19,7 +18,6 @@ import in.succinct.beckn.Category;
 import in.succinct.beckn.Circle;
 import in.succinct.beckn.Context;
 import in.succinct.beckn.Descriptor;
-import in.succinct.beckn.Fulfillment.FulfillmentType;
 import in.succinct.beckn.FulfillmentStop;
 import in.succinct.beckn.Fulfillments;
 import in.succinct.beckn.Images;
@@ -342,8 +340,8 @@ public class CatalogSearchEngine {
                     outItem.setTime(new Time());
                     outItem.getTime().setLabel(dbItem.isActive() ? "enable" : "disable");
                     outItem.getTime().setTimestamp(dbItem.getUpdatedAt());
-                    FulfillmentType outFulfillmentType = fulfillments.get(outItem.getFulfillmentId()).getType();
-                    FulfillmentType inFulfillmentType = intentFulfillment == null ? null : intentFulfillment.getType();
+                    String outFulfillmentType = fulfillments.get(outItem.getFulfillmentId()).getType();
+                    String inFulfillmentType = intentFulfillment == null ? null : intentFulfillment.getType();
                     FulfillmentStop end = intentFulfillment == null ? null : intentFulfillment.getEnd();
 
                     if (outFulfillmentType.matches(inFulfillmentType) ) {
