@@ -344,7 +344,7 @@ public class CatalogSearchEngine {
                     String inFulfillmentType = intentFulfillment == null ? null : intentFulfillment.getType();
                     FulfillmentStop end = intentFulfillment == null ? null : intentFulfillment.getEnd();
 
-                    if (outFulfillmentType.matches(inFulfillmentType) ) {
+                    if (inFulfillmentType == null || outFulfillmentType.matches(inFulfillmentType) ) {
 
                         outItem.setMatched(true);
                         outItem.setRelated(true);
