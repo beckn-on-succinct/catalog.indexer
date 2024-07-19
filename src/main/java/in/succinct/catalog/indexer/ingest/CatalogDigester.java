@@ -26,6 +26,7 @@ import in.succinct.beckn.Payment;
 import in.succinct.beckn.Payments;
 import in.succinct.beckn.Provider;
 import in.succinct.beckn.Providers;
+import in.succinct.catalog.indexer.db.model.HasDescriptor;
 import in.succinct.catalog.indexer.db.model.IndexedActivatableModel;
 import in.succinct.catalog.indexer.db.model.IndexedProviderModel;
 import in.succinct.catalog.indexer.db.model.ProviderLocation;
@@ -116,6 +117,17 @@ public class CatalogDigester implements Task {
                     c = Database.getTable(clazz).getRefreshed(c);
                     if (c.getRawRecord().isNewRecord()){
                         c.setObjectName(id);
+                        JSONObject o = new JSONObject();
+                        o.put("id",id);
+                        if (c instanceof HasDescriptor){
+                            Descriptor descriptor = new Descriptor();
+                            descriptor.setName(id);
+                            descriptor.setCode(id);
+                            descriptor.setShortDesc(id);
+                            descriptor.setLongDesc(id);
+                            o.put("descriptor",descriptor.toString());
+                        }
+                        c.setObjectJson(o.toString());
                         c.save();
                     }
                 }

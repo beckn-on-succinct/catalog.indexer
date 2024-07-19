@@ -9,7 +9,7 @@ import com.venky.swf.sql.Select;
 import java.util.List;
 
 @SuppressWarnings("unused")
-public interface Provider extends Model , IndexedSubscriberModel {
+public interface Provider extends Model , IndexedSubscriberModel, HasDescriptor {
     public static List<Provider> findBySubscriberId(String subscriberId){
         Select select  = new Select().from(Provider.class);
         select.where(new Expression(select.getPool(),"SUBSCRIBER_ID", Operator.EQ,subscriberId));

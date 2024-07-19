@@ -342,7 +342,9 @@ public class CatalogSearchEngine {
                     outItem.getTime().setTimestamp(dbItem.getUpdatedAt());
                     String outFulfillmentType = fulfillments.get(outItem.getFulfillmentId()).getType();
                     String inFulfillmentType = intentFulfillment == null ? null : intentFulfillment.getType();
-                    FulfillmentStop end = intentFulfillment == null ? null : intentFulfillment.getEnd();
+                    FulfillmentStop end = intentFulfillment == null ? (intent.getLocation() == null ? null : new FulfillmentStop(){{
+                        setLocation(intent.getLocation());
+                    }}) : intentFulfillment.getEnd();
 
                     if (inFulfillmentType == null || outFulfillmentType.matches(inFulfillmentType) ) {
 
@@ -360,7 +362,7 @@ public class CatalogSearchEngine {
                         Location storeLocation = locations.get(outItem.getLocationId());
                         City city = City.findByCountryAndStateAndName(storeLocation.getAddress().getCountry(),storeLocation.getAddress().getState(),storeLocation.getAddress().getCity());
 
-                        boolean storeInCity = ObjectUtil.equals(city.getCode(),request.getContext().getCity()) || ObjectUtil.equals(request.getContext().getCity(),"*");
+                        boolean storeInCity = ObjectUtil.equals(city.getCode(),request.getContext().getCity()) || ObjectUtil.equals(request.getContext().getCity(),"*") || ObjectUtil.isVoid(request.getContext().getCity());
                         boolean includeItem = false;
 
                         if (end != null && end.getLocation() != null && end.getLocation().getGps() != null){
