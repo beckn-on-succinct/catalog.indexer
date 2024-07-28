@@ -125,7 +125,7 @@ public class CatalogDigester implements Task {
                             descriptor.setCode(id);
                             descriptor.setShortDesc(id);
                             descriptor.setLongDesc(id);
-                            o.put("descriptor",descriptor.toString());
+                            o.put("descriptor",descriptor.getInner());
                         }
                         c.setObjectJson(o.toString());
                         c.save();
