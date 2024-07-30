@@ -30,6 +30,7 @@ public interface IndexedSubscriberModel {
 
 
     @COLUMN_SIZE(1024*100)
+    @Index
     public String getObjectJson();
     public void setObjectJson(String objectJson);
 }

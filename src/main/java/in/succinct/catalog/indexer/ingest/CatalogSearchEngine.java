@@ -109,6 +109,19 @@ public class CatalogSearchEngine {
         return q.toString();
     }
 
+    private String getDescription(Descriptor descriptor){
+        String name =  StringUtil.valueOf(descriptor.getName());
+        if (!ObjectUtil.isVoid(descriptor.getCode())){
+            name = name + " " + descriptor.getCode();
+        }
+        if (!ObjectUtil.isVoid(descriptor.getShortDesc())){
+            name = name + " " + descriptor.getShortDesc();
+        }
+        if (!ObjectUtil.isVoid(descriptor.getLongDesc())){
+            name = name + " " + descriptor.getLongDesc();
+        }
+        return name.trim();
+    }
 
     private void indexed_search(Request request, List<Request> replies) {
 
@@ -116,7 +129,7 @@ public class CatalogSearchEngine {
             @Override
             protected Request getValue(String subscriberId) {
                 return new Request(){{
-                    setSuppressed(true);
+                    setSuppressed(false);
                     setContext(new Context(request.getContext().toString()){{
                         setAction("on_search");
                         setBppUri(subscriberMap.get(subscriberId).getSubscriberUrl());
@@ -161,20 +174,23 @@ public class CatalogSearchEngine {
         Descriptor categoryDescriptor = category == null ? intentDescriptor : normalizeDescriptor(category.getDescriptor());
 
         StringBuilder q = new StringBuilder();
-        if (providerDescriptor != null && !ObjectUtil.isVoid(providerDescriptor.getName())){
-            providerDescriptor.setName(providerDescriptor.getName().trim());
-            q.append(String.format(" ( %s OR %s )",
-                    q("PROVIDER",providerDescriptor.getName()),
-                    q("PROVIDER_LOCATION",providerDescriptor.getName())));
+        if (providerDescriptor != null ){
+            String desc = getDescription(providerDescriptor);
+
+            q.append(String.format(" ( %s OR %s ) ",
+                    q("PROVIDER",desc),
+                    q("PROVIDER_LOCATION",desc)));
         }else if (provider != null && !ObjectUtil.isVoid(provider.getId())) {
+            provider.setId(provider.getId().trim());
             q.append(q(in.succinct.catalog.indexer.db.model.Provider.class,"PROVIDER_ID",provider.getId()));
         }
-        if (categoryDescriptor != null && !ObjectUtil.isVoid(categoryDescriptor.getName())){
-            categoryDescriptor.setName(categoryDescriptor.getName().trim());
+        if (categoryDescriptor != null ){
+            String desc = getDescription(categoryDescriptor);
+            // categoryDescriptor.setName(categoryDescriptor.getName().trim());
             if (q.length() > 0){
                 q.append( intentDescriptor == null ? " AND " : " OR " );
             }
-            q.append(q("CATEGORY",categoryDescriptor.getName()));
+            q.append(q("CATEGORY", desc));
         }else if (category != null && !ObjectUtil.isVoid(category.getId())){
             if (q.length() > 0){
                 q.append( intentDescriptor == null ? " AND " : " OR " );
@@ -183,12 +199,21 @@ public class CatalogSearchEngine {
             q.append(q(in.succinct.catalog.indexer.db.model.Category.class,"CATEGORY_ID",category.getId()));
         }
 
-        if (itemDescriptor != null && !ObjectUtil.isVoid(itemDescriptor.getName())){
-            itemDescriptor.setName(itemDescriptor.getName().trim());
+        if (itemDescriptor != null ){
+            String desc =   getDescription(itemDescriptor);
+            if (q.length() > 0) {
+                q.append(intentDescriptor == null ? " AND " : " OR ");
+            }
+            q.append(String.format("( %s OR %s )",
+                    q("OBJECT_NAME", desc),
+                    q("OBJECT_JSON", desc)
+            ));
+        }else if (item != null && ObjectUtil.isVoid(item.getId())){
             if (q.length() > 0){
                 q.append( intentDescriptor == null ? " AND " : " OR " );
             }
-            q.append(q("OBJECT_NAME",itemDescriptor.getName()));
+            item.setId(item.getId().trim());
+            q.append(q("OBJECT_ID",item.getId()));
         }
         List<Long> itemIds = new ArrayList<>();
         if (!ObjectUtil.isVoid(q.toString())) {
@@ -410,8 +435,10 @@ public class CatalogSearchEngine {
     }
 
     private Descriptor normalizeDescriptor(Descriptor descriptor) {
-        if (descriptor != null && descriptor.getInner().isEmpty()){
-            descriptor = null;
+        if (descriptor != null){
+            if (descriptor.getInner().isEmpty() || ObjectUtil.isVoid(getDescription(descriptor))){
+                descriptor = null;
+            }
         }
         return descriptor;
     }
