@@ -7,6 +7,23 @@ import com.venky.swf.db.model.Model;
 public interface Item extends Model,IndexedActivatableModel, HasDescriptor {
 
     @Index
+    String getCategoryIds();
+    void setCategoryIds(String categoryIds);
+
+    @Index
+    String getFulfillmentIds();
+    void setFulfillmentIds(String fulfillmentIds);
+
+    @Index
+    String getPaymentIds();
+    void setPaymentIds(String paymentIds);
+
+    @Index
+    String getLocationIds();
+    void setLocationIds(String locationIds);
+
+    /*
+    @Index
     @UNIQUE_KEY(allowMultipleRecordsWithNull = false)
     public Long getCategoryId();
     public void setCategoryId(Long id);
@@ -29,6 +46,6 @@ public interface Item extends Model,IndexedActivatableModel, HasDescriptor {
     public Long getProviderLocationId();
     public void setProviderLocationId(Long id);
     public ProviderLocation getProviderLocation();
-
+    */
 
 }

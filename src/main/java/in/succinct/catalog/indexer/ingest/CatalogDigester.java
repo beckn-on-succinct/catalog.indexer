@@ -146,6 +146,7 @@ public class CatalogDigester implements Task {
         return (Class<T>)modelClassMap.get(name);
     }
 
+    @SuppressWarnings("unchecked")
     public void ensureProvider(Provider bProvider, boolean active){
 
         Config.instance().getLogger(getClass().getName()).info("CatalogDigester: items size: " + bProvider.getItems().size());
@@ -210,34 +211,32 @@ public class CatalogDigester implements Task {
                     item.setFulfillmentIds(new BecknStrings());
                     item.getFulfillmentIds().add(item.getFulfillmentId());
                 }
+                item.getFulfillmentIds().getInner().sort((s1,s2)->((String)s1).compareTo((String)s2));
                 if (item.getLocationIds() == null){
                     item.setLocationIds(new BecknStrings());
                     item.getLocationIds().add(item.getLocationId());
                 }
+                item.getLocationIds().getInner().sort((s1,s2)->((String)s1).compareTo((String)s2));
 
                 if (item.getPaymentIds() == null){
                     item.setPaymentIds(new BecknStrings());
                     item.getPaymentIds().add(null);
                 }
+                item.getPaymentIds().getInner().sort((s1,s2)->((String)s1).compareTo((String)s2));
                 if (item.getCategoryIds() == null){
                     item.setCategoryIds(new BecknStrings());
                     item.getCategoryIds().add(item.getCategoryId());
                 }
+                item.getCategoryIds().getInner().sort((s1,s2)->((String)s1).compareTo((String)s2));
 
-                for (String categoryId : item.getCategoryIds()) {
-                    for (String locationId : item.getLocationIds()) {
-                        for (String paymentId : item.getPaymentIds()) {
-                            for (String fulfillmentId : item.getFulfillmentIds()) {
-                                ensureProviderModel(in.succinct.catalog.indexer.db.model.Item.class, provider, active, item, (model, becknObject) -> {
-                                    if (categoryId != null ) model.setCategoryId(categoryMap.get(categoryId).getId());
-                                    if (locationId != null ) model.setProviderLocationId(providerLocationMap.get(locationId).getId());
-                                    if (paymentId != null) model.setPaymentId(paymentMap.get(paymentId).getId());
-                                    if (fulfillmentId !=null) model.setFulfillmentId(fulfillmentMap.get(fulfillmentId).getId());
-                                });
-                            }
-                        }
-                    }
-                }
+                ensureProviderModel(in.succinct.catalog.indexer.db.model.Item.class, provider, active, item, (model, becknObject) -> {
+
+                    model.setCategoryIds(item.getCategoryIds().toString());
+                    model.setLocationIds(item.getLocationIds().toString());
+                    model.setPaymentIds(item.getPaymentIds().toString());
+                    model.setFulfillmentIds(item.getFulfillmentIds().toString());
+                });
+
             }
         }
 

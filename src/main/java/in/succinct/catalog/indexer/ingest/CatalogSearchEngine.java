@@ -14,6 +14,7 @@ import com.venky.swf.sql.Conjunction;
 import com.venky.swf.sql.Expression;
 import com.venky.swf.sql.Operator;
 import com.venky.swf.sql.Select;
+import in.succinct.beckn.BecknStrings;
 import in.succinct.beckn.Catalog;
 import in.succinct.beckn.Categories;
 import in.succinct.beckn.Category;
@@ -91,11 +92,11 @@ public class CatalogSearchEngine {
         return q;
     }
 
-    public <T extends Model & IndexedSubscriberModel> String q(Class<T> clazz, String name, String idValue) {
+    public <T extends Model & IndexedSubscriberModel> String q(Class<T> clazz, String idColumnName, String descriptionValue) {
         Select select = new Select().from(clazz);
         select.where(new Expression(select.getPool(), Conjunction.AND).
                 add(new Expression(select.getPool(), "SUBSCRIBER_ID", Operator.IN, subscriberMap.keySet().toArray(new String[]{}))).
-                add(new Expression(select.getPool(), "OBJECT_ID", Operator.EQ, idValue)));
+                add(new Expression(select.getPool(), "OBJECT_NAME", Operator.EQ, descriptionValue)));
 
         List<T> dbObjects = select.execute();
 
@@ -105,14 +106,14 @@ public class CatalogSearchEngine {
             q.append("(");
             for (Iterator<T> i = dbObjects.iterator(); i.hasNext(); ) {
                 T dbObject = i.next();
-                q.append(String.format(" %s:%d ", name, dbObject.getId()));
+                q.append(String.format(" %s:\"%s\"", idColumnName, dbObject.getObjectId()));
                 if (i.hasNext()) {
                     q.append(" OR ");
                 }
             }
             q.append(")");
         } else {
-            q.append(String.format("( %s: NULL )", name)); // Query should fail.
+            q.append(String.format("( %s: NULL )", idColumnName)); // Query should fail.
         }
         return q.toString();
     }
@@ -146,9 +147,8 @@ public class CatalogSearchEngine {
         if (providerDescriptor != null || intentDescriptor != null) {
             String desc = getDescription(providerDescriptor != null ? providerDescriptor : intentDescriptor);
 
-            providerQ.append(String.format(" ( %s OR %s ) ",
-                    q("PROVIDER", desc),
-                    q("PROVIDER_LOCATION", desc)));
+            providerQ.append(String.format(" ( %s ) ",
+                    q("PROVIDER", desc)));
 
             if (providerDescriptor != null) {
                 conjunction.set(Conjunction.AND);
@@ -181,7 +181,7 @@ public class CatalogSearchEngine {
         StringBuilder categoryQ = new StringBuilder();
         if (categoryDescriptor != null || intentDescriptor != null) {
             String desc = getDescription(categoryDescriptor != null ? categoryDescriptor : intentDescriptor);
-            categoryQ.append(q("CATEGORY", desc));
+            categoryQ.append(q(in.succinct.catalog.indexer.db.model.Category.class,"CATEGORY_IDS", desc));
             if (categoryDescriptor != null) {
                 conjunction.set(Conjunction.AND);
             }
@@ -191,7 +191,7 @@ public class CatalogSearchEngine {
                 categoryQ.append(" ").append(conjunction.get()).append(" ");
             }
             category.setId(category.getId().trim());
-            categoryQ.append(q(in.succinct.catalog.indexer.db.model.Category.class, "CATEGORY_ID", category.getId()));
+            categoryQ.append(String.format(" CATEGORY_IDS:%s",category.getId()));
             conjunction.set(Conjunction.AND);
         }
         if (categoryQ.length() > 0) {
@@ -366,46 +366,61 @@ public class CatalogSearchEngine {
 
         List<in.succinct.catalog.indexer.db.model.Item> records = sel.where(where).execute(in.succinct.catalog.indexer.db.model.Item.class, 50);
 
-        Set<String> subscriberIds = new HashSet<>();
-        Set<Long> providerIds = new HashSet<>();
-        Set<Long> providerLocationIds = new HashSet<>();
-        Set<Long> fulfillmentIds = new HashSet<>();
-        Set<Long> categoryIds = new HashSet<>();
-        Set<Long> paymentIds = new HashSet<>();
+        Set<String> allSubscriberIds = new HashSet<>();
+        Set<String> allProviderIds = new HashSet<>();
+        Set<String> allProviderLocationIds = new HashSet<>();
+        Set<String> allFulfillmentIds = new HashSet<>();
+        Set<String> allCategoryIds = new HashSet<>();
+        Set<String> allPaymentIds = new HashSet<>();
 
-        Cache<String, Cache<Long, in.succinct.catalog.indexer.db.model.Item>> appItemMap = createAppDbCache(in.succinct.catalog.indexer.db.model.Item.class, new HashSet<>());
+        Cache<String, Cache<String, in.succinct.catalog.indexer.db.model.Item>> appItemMap = createAppDbCache(in.succinct.catalog.indexer.db.model.Item.class, new HashSet<>());
         records.forEach(i -> {
-            subscriberIds.add(i.getSubscriberId());
-            providerIds.add(i.getProviderId());
-            providerLocationIds.add(i.getProviderLocationId());
-            fulfillmentIds.add(i.getFulfillmentId());
-            categoryIds.add(i.getCategoryId());
-            paymentIds.add(i.getPaymentId());
-            appItemMap.get(i.getSubscriberId()).put(i.getId(), i);
+            allSubscriberIds.add(i.getSubscriberId());
+            allProviderIds.add(i.getProvider().getObjectId());
+            allProviderLocationIds.addAll(BecknStrings.parse(i.getLocationIds()));
+            allFulfillmentIds.addAll(BecknStrings.parse(i.getFulfillmentIds()));
+            allCategoryIds.addAll(BecknStrings.parse(i.getCategoryIds()));
+            allPaymentIds.addAll(BecknStrings.parse(i.getPaymentIds()));
+            appItemMap.get(i.getSubscriberId()).put(i.getObjectId(), i);
         });
-        Cache<String, Cache<Long, in.succinct.catalog.indexer.db.model.Provider>> appProviderMap = createAppDbCache(in.succinct.catalog.indexer.db.model.Provider.class, providerIds);
-        Cache<String, Cache<Long, in.succinct.catalog.indexer.db.model.ProviderLocation>> appLocationMap = createAppDbCache(in.succinct.catalog.indexer.db.model.ProviderLocation.class, providerLocationIds);
-        Cache<String, Cache<Long, in.succinct.catalog.indexer.db.model.Fulfillment>> appFulfillmentMap = createAppDbCache(in.succinct.catalog.indexer.db.model.Fulfillment.class, fulfillmentIds);
-        Cache<String, Cache<Long, in.succinct.catalog.indexer.db.model.Category>> appCategoryMap = createAppDbCache(in.succinct.catalog.indexer.db.model.Category.class, categoryIds);
-        Cache<String, Cache<Long, in.succinct.catalog.indexer.db.model.Payment>> appPaymentMap = createAppDbCache(in.succinct.catalog.indexer.db.model.Payment.class, paymentIds);
+        Cache<String, Cache<String, in.succinct.catalog.indexer.db.model.Provider>> appProviderMap = createAppDbCache(in.succinct.catalog.indexer.db.model.Provider.class, allProviderIds);
+        Cache<String, Cache<String, in.succinct.catalog.indexer.db.model.ProviderLocation>> appLocationMap = createAppDbCache(in.succinct.catalog.indexer.db.model.ProviderLocation.class, allProviderLocationIds);
+        Cache<String, Cache<String, in.succinct.catalog.indexer.db.model.Fulfillment>> appFulfillmentMap = createAppDbCache(in.succinct.catalog.indexer.db.model.Fulfillment.class, allFulfillmentIds);
+        Cache<String, Cache<String, in.succinct.catalog.indexer.db.model.Category>> appCategoryMap = createAppDbCache(in.succinct.catalog.indexer.db.model.Category.class, allCategoryIds);
+        Cache<String, Cache<String, in.succinct.catalog.indexer.db.model.Payment>> appPaymentMap = createAppDbCache(in.succinct.catalog.indexer.db.model.Payment.class, allPaymentIds);
+        Cache<String, Cache<Long, in.succinct.catalog.indexer.db.model.Provider>> altProviderMap = new Cache<String, Cache<Long, in.succinct.catalog.indexer.db.model.Provider>>() {
+            @Override
+            protected Cache<Long, in.succinct.catalog.indexer.db.model.Provider> getValue(String subscriberId) {
+                return new Cache<Long, in.succinct.catalog.indexer.db.model.Provider>() {
+                    @Override
+                    protected in.succinct.catalog.indexer.db.model.Provider getValue(Long aLong) {
+                        return null;
+                    }
+                };
+            }
+        };
+        appProviderMap.forEach((s,c)-> {
+            c.forEach((oid, v) -> {
+                altProviderMap.get(s).put(v.getId(), v);
+            });
+        });
 
-
-        for (String subscriberId : subscriberIds) {
+        for (String subscriberId : allSubscriberIds) {
             Request reply = subscriberReplies.get(subscriberId);
             Context context = reply.getContext();
             Catalog catalog = reply.getMessage().getCatalog();
             Providers providers = catalog.getProviders();
 
-            Map<Long, in.succinct.catalog.indexer.db.model.Item> itemMap = appItemMap.get(subscriberId);
-            for (Long itemId : itemMap.keySet()) {
-                Config.instance().getLogger(getClass().getName()).info("SearchAdaptor: Looping through result items" + itemId);
-                in.succinct.catalog.indexer.db.model.Item dbItem = itemMap.get(itemId);
+            Map<String, in.succinct.catalog.indexer.db.model.Item> itemMap = appItemMap.get(subscriberId);
+            for (String becknItemId : itemMap.keySet()) {
+                Config.instance().getLogger(getClass().getName()).info("SearchAdaptor: Looping through result items" + becknItemId);
+                in.succinct.catalog.indexer.db.model.Item dbItem = itemMap.get(becknItemId);
 
-                in.succinct.catalog.indexer.db.model.Provider dbProvider = appProviderMap.get(subscriberId).get(dbItem.getProviderId());
-                ProviderLocation dbProviderLocation = appLocationMap.get(subscriberId).get(dbItem.getProviderLocationId());
-                Fulfillment dbFulfillment = appFulfillmentMap.get(subscriberId).get(dbItem.getFulfillmentId());
-                in.succinct.catalog.indexer.db.model.Category dbCategory = appCategoryMap.get(subscriberId).get(dbItem.getCategoryId());
-                Payment dbPayment = appPaymentMap.get(subscriberId).get(dbItem.getPaymentId());
+                in.succinct.catalog.indexer.db.model.Provider dbProvider = altProviderMap.get(subscriberId).get(dbItem.getProviderId());
+                BecknStrings categoryIds = new BecknStrings(dbItem.getCategoryIds());
+                BecknStrings fulfillmentIds = new BecknStrings(dbItem.getFulfillmentIds());
+                BecknStrings paymentIds = new BecknStrings(dbItem.getPaymentIds());
+                BecknStrings locationIds = new BecknStrings(dbItem.getLocationIds());
 
                 Provider outProvider = providers.get(dbProvider.getObjectId());
                 if (outProvider == null) {
@@ -421,58 +436,63 @@ public class CatalogSearchEngine {
                     categories = new Categories();
                     outProvider.setCategories(categories);
                 }
-                if (dbCategory != null) {
-                    Category outCategory = categories.get(dbCategory.getObjectId());
-                    if (outCategory == null) {
-                        categories.add(new Category(dbCategory.getObjectJson()));
+                for (String categoryId : categoryIds) {
+                    if (categories.get(categoryId) == null) {
+                        in.succinct.catalog.indexer.db.model.Category category = appCategoryMap.get(subscriberId).get(categoryId);
+                        if (category != null) {
+                            categories.add(new Category(category.getObjectJson()));
+                        }
                     }
                 }
-
                 Locations locations = outProvider.getLocations();
                 if (locations == null) {
                     locations = new Locations();
                     outProvider.setLocations(locations);
                 }
-                if (dbProviderLocation != null) {
-                    Location outLocation = locations.get(dbProviderLocation.getObjectId());
-                    if (outLocation == null) {
-                        locations.add(new Location(dbProviderLocation.getObjectJson()));
+                for (String locationId : locationIds) {
+                    if (locations.get(locationId) == null){
+                        ProviderLocation providerLocation = appLocationMap.get(subscriberId).get(locationId);
+                        if (providerLocation != null) {
+                            locations.add(new Location(providerLocation.getObjectJson()));
+                        }
                     }
                 }
-
                 Fulfillments fulfillments = outProvider.getFulfillments();
                 if (fulfillments == null) {
                     fulfillments = new Fulfillments();
                     outProvider.setFulfillments(fulfillments);
                 }
-                if (dbFulfillment != null) {
-                    in.succinct.beckn.Fulfillment outFulfillment = fulfillments.get(dbFulfillment.getObjectId());
-                    if (outFulfillment == null) {
-                        outFulfillment = new in.succinct.beckn.Fulfillment(dbFulfillment.getObjectJson());
-                        fulfillments.add(outFulfillment);
 
-                        in.succinct.beckn.Fulfillment catFulfillment = catalog.getFulfillments().get(dbFulfillment.getObjectId());
-                        if (catFulfillment == null) {
-                            catFulfillment = new in.succinct.beckn.Fulfillment();
-                            catFulfillment.setId(outFulfillment.getId());
-                            catFulfillment.setType(outFulfillment.getType());
-                            catalog.getFulfillments().add(catFulfillment);
+                for (String fulfillmentId : fulfillmentIds) {
+                    if (fulfillments.get(fulfillmentId) == null){
+                        Fulfillment fulfillment = appFulfillmentMap.get(subscriberId).get(fulfillmentId);
+                        if (fulfillment != null){
+                            in.succinct.beckn.Fulfillment outFulfillment = new in.succinct.beckn.Fulfillment(fulfillment.getObjectJson());
+                            fulfillments.add(outFulfillment);
+                            in.succinct.beckn.Fulfillment catFulfillment = catalog.getFulfillments().get(fulfillmentId);
+                            if (catFulfillment == null){
+                                catFulfillment = new in.succinct.beckn.Fulfillment();
+                                catFulfillment.setId(fulfillmentId);
+                                catFulfillment.setType(outFulfillment.getType());
+                                catalog.getFulfillments().add(catFulfillment);
+                            }
                         }
                     }
                 }
-
                 Payments payments = outProvider.getPayments();
                 if (payments == null) {
                     payments = new Payments();
                     outProvider.setPayments(payments);
                 }
-                in.succinct.beckn.Payment bapPaymentIntent = request.getMessage().getIntent().getPayment();
-                if (dbPayment != null) {
-                    if (payments.get(dbPayment.getObjectId()) == null) {
-                        in.succinct.beckn.Payment payment = new in.succinct.beckn.Payment(dbPayment.getObjectJson());
-                        payments.add(payment);
+                for (String paymentId : paymentIds) {
+                    if (payments.get(paymentId) == null){
+                        Payment payment = appPaymentMap.get(subscriberId).get(paymentId);
+                        if (payment != null){
+                            payments.add(new in.succinct.beckn.Payment(payment.getObjectJson()));
+                        }
                     }
                 }
+
                 Items items = outProvider.getItems();
                 if (items == null) {
                     items = new Items();
@@ -568,37 +588,45 @@ public class CatalogSearchEngine {
         return descriptor;
     }
 
-    private <T extends Model> Cache<Long, T> createDbCache(Class<T> clazz, Set<Long> ids) {
-        Cache<Long, T> cache = new Cache<>(0, 0) {
+    private <T extends Model & IndexedSubscriberModel> Cache<String, T> createDbCache(Class<T> clazz, String subscriberId ,Set<String> ids) {
+        Cache<String, T> cache = new Cache<>(0, 0) {
 
             @Override
-            protected T getValue(Long id) {
+            protected T getValue(String id) {
                 if (id == null) {
                     return null;
                 } else {
-                    return Database.getTable(clazz).get(id);
+                    T m  = Database.getTable(clazz).newRecord();
+                    m.setObjectId(id);
+                    m.setSubscriberId(subscriberId);
+                    m = Database.getTable(clazz).getRefreshed(m);
+                    return m;
                 }
             }
         };
         if (!ids.isEmpty() && !ids.contains(null)) {
             Select select = new Select().from(clazz);
-            select.where(new Expression(select.getPool(), "ID", Operator.IN, ids.toArray()));
-            select.execute(clazz).forEach(t -> cache.put(t.getId(), t));
+
+            Expression where  = new Expression(select.getPool(),Conjunction.AND).
+                    add(new Expression(select.getPool(), "OBJECT_ID", Operator.IN, ids.toArray())).
+                    add(new Expression(select.getPool(), "SUBSCRIBER_ID", Operator.EQ, subscriberId));
+
+            select.execute(clazz).forEach(t -> cache.put(t.getObjectId(), t));
         }
         return cache;
     }
 
-    private <T extends Model & IndexedSubscriberModel> Cache<String, Cache<Long, T>> createAppDbCache(Class<T> clazz, Set<Long> ids) {
-        Cache<String, Cache<Long, T>> cache = new Cache<>(0, 0) {
+    private <T extends Model & IndexedSubscriberModel> Cache<String, Cache<String, T>> createAppDbCache(Class<T> clazz, Set<String> ids) {
+        Cache<String, Cache<String, T>> cache = new Cache<>(0, 0) {
             @Override
-            protected Cache<Long, T> getValue(String subscriberId) {
-                return createDbCache(clazz, new HashSet<>());
+            protected Cache<String, T> getValue(String subscriberId) {
+                return createDbCache(clazz, subscriberId, new HashSet<>());
             }
         };
         if (!ids.isEmpty() && !ids.contains(null)) {
             Select select = new Select().from(clazz);
-            select.where(new Expression(select.getPool(), "ID", Operator.IN, ids.toArray()));
-            select.execute(clazz).forEach(t -> cache.get(t.getSubscriberId()).put(t.getId(), t));
+            select.where(new Expression(select.getPool(), "OBJECT_ID", Operator.IN, ids.toArray()));
+            select.execute(clazz).forEach(t -> cache.get(t.getSubscriberId()).put(t.getObjectId(), t));
         }
         return cache;
     }
