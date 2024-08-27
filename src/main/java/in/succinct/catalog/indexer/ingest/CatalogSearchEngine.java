@@ -72,8 +72,7 @@ public class CatalogSearchEngine {
             Config.instance().getLogger(getClass().getName()).log(Level.WARNING, "Exception found", ex);
         }
     }
-
-    private StringBuilder q(String name, String value) {
+    private StringBuilder q(String name, String value, boolean exact) {
         StringBuilder q = new StringBuilder();
         if (ObjectUtil.isVoid(value)) {
             return q;
@@ -82,21 +81,35 @@ public class CatalogSearchEngine {
         q.append("(");
         while (tokenizer.hasMoreTokens()) {
             String token = tokenizer.nextToken();
-            q.append(name).append(":").append(token).append("*");
+            if (exact){
+                q.append(name).append(":\"").append(token).append("\"");
+            }else {
+                q.append(name).append(":").append(token).append("*");
+            }
             if (tokenizer.hasMoreTokens()) {
                 q.append(" OR ");
             }
         }
         q.append(")");
-
         return q;
     }
 
-    public <T extends Model & IndexedSubscriberModel> String q(Class<T> clazz, String idColumnName, String descriptionValue) {
+    public interface QueryExtractor<T extends Model & IndexedSubscriberModel> {
+        String extractQuery(T record);
+    }
+
+    public <T extends Model & IndexedSubscriberModel> String q(Class<T> clazz, QueryExtractor<T> extractor, String conditionColumnName, String conditionColumnValue,boolean exact) {
+        // Do Lucene
+        LuceneIndexer indexer = LuceneIndexer.instance(clazz);
+        Query query = indexer.constructQuery(q(conditionColumnName,conditionColumnValue,exact).toString());
+        List<Long> ids = indexer.findIds(query,0);
+
+
         Select select = new Select().from(clazz);
+
         select.where(new Expression(select.getPool(), Conjunction.AND).
                 add(new Expression(select.getPool(), "SUBSCRIBER_ID", Operator.IN, subscriberMap.keySet().toArray(new String[]{}))).
-                add(new Expression(select.getPool(), "OBJECT_NAME", Operator.EQ, descriptionValue)));
+                add(new Expression(select.getPool(), "ID", Operator.IN, ids.toArray())));
 
         List<T> dbObjects = select.execute();
 
@@ -106,18 +119,18 @@ public class CatalogSearchEngine {
             q.append("(");
             for (Iterator<T> i = dbObjects.iterator(); i.hasNext(); ) {
                 T dbObject = i.next();
-                q.append(String.format(" %s:\"%s\"", idColumnName, dbObject.getObjectId()));
+                q.append(extractor.extractQuery(dbObject));
                 if (i.hasNext()) {
                     q.append(" OR ");
                 }
             }
             q.append(")");
         } else {
-            q.append(String.format("( %s: NULL )", idColumnName)); // Query should fail.
+            //q.append(String.format("( %s: NULL )", idColumnName)); // Query should fail.
+            q.append(extractor.extractQuery(null));
         }
         return q.toString();
     }
-
     private String getDescription(Descriptor descriptor) {
         if (descriptor == null) {
             return "";
@@ -148,7 +161,7 @@ public class CatalogSearchEngine {
             String desc = getDescription(providerDescriptor != null ? providerDescriptor : intentDescriptor);
 
             providerQ.append(String.format(" ( %s ) ",
-                    q("PROVIDER", desc)));
+                    q("PROVIDER", desc,false)));
 
             if (providerDescriptor != null) {
                 conjunction.set(Conjunction.AND);
@@ -159,7 +172,14 @@ public class CatalogSearchEngine {
                 providerQ.append(" ").append(conjunction.get()).append(" ");
             }
             provider.setId(provider.getId().trim());
-            providerQ.append(q(in.succinct.catalog.indexer.db.model.Provider.class, "PROVIDER_ID", provider.getId()));
+            providerQ.append(q(in.succinct.catalog.indexer.db.model.Provider.class, record -> {
+                if (record != null) {
+                    return String.format(" PROVIDER_ID:%d ", record.getId());
+                }else {
+                    return " PROVIDER_ID:NULL ";
+                }
+
+            }, "OBJECT_ID",provider.getId(),true));
 
             conjunction.set(Conjunction.AND);
         }
@@ -181,7 +201,13 @@ public class CatalogSearchEngine {
         StringBuilder categoryQ = new StringBuilder();
         if (categoryDescriptor != null || intentDescriptor != null) {
             String desc = getDescription(categoryDescriptor != null ? categoryDescriptor : intentDescriptor);
-            categoryQ.append(q(in.succinct.catalog.indexer.db.model.Category.class,"CATEGORY_IDS", desc));
+            categoryQ.append(q(in.succinct.catalog.indexer.db.model.Category.class,record -> {
+                if (record != null) {
+                    return String.format(" CATEGORY_IDS:\"%s\" ", record.getObjectId());
+                }else {
+                    return " CATEGORY_IDS:NULL ";
+                }
+            }, "OBJECT_NAME",desc,false));
             if (categoryDescriptor != null) {
                 conjunction.set(Conjunction.AND);
             }
@@ -212,7 +238,7 @@ public class CatalogSearchEngine {
         StringBuilder itemQ = new StringBuilder();
         if (itemDescriptor != null || intentDescriptor != null) {
             String desc = getDescription(itemDescriptor != null ? itemDescriptor : intentDescriptor);
-            itemQ.append(q("OBJECT_NAME", desc));
+            itemQ.append(q("OBJECT_NAME", desc,false));
             if (itemDescriptor != null) {
                 conjunction.set(Conjunction.AND);
             }
@@ -223,7 +249,7 @@ public class CatalogSearchEngine {
                 itemQ.append(" ").append(conjunction.get()).append(" ");
             }
             item.setId(item.getId().trim());
-            itemQ.append(q("OBJECT_ID", item.getId()));
+            itemQ.append(q("OBJECT_ID", item.getId(),true));
             conjunction.set(Conjunction.AND);
         }
         if (itemQ.length() > 0) {
@@ -243,7 +269,7 @@ public class CatalogSearchEngine {
         boolean present;
         Conjunction conjunction;
     }
-
+    @SuppressWarnings("MismatchedQueryAndUpdateOfCollection")
     private void indexed_search(Request request, List<Request> replies) {
 
         Map<String, Request> subscriberReplies = new Cache<>(0, 0) {
@@ -297,7 +323,7 @@ public class CatalogSearchEngine {
         IntentQuery providerQuery = new IntentQuery(getProviderQuery(request, providerConjunction),providerConjunction.get());
         IntentQuery categoryQuery = new IntentQuery(getCategoryQuery(request, categoryConjunction),categoryConjunction.get());
         IntentQuery itemQuery = new IntentQuery(getItemQuery(request,itemConjunction),itemConjunction.get());
-        Map<Conjunction,List<IntentQuery>> queries = new UnboundedCache<Conjunction, List<IntentQuery>>() {
+        Map<Conjunction,List<IntentQuery>> queries = new UnboundedCache<>() {
             @Override
             protected List<IntentQuery> getValue(Conjunction key) {
                 return new ArrayList<>();
@@ -388,10 +414,10 @@ public class CatalogSearchEngine {
         Cache<String, Cache<String, in.succinct.catalog.indexer.db.model.Fulfillment>> appFulfillmentMap = createAppDbCache(in.succinct.catalog.indexer.db.model.Fulfillment.class, allFulfillmentIds);
         Cache<String, Cache<String, in.succinct.catalog.indexer.db.model.Category>> appCategoryMap = createAppDbCache(in.succinct.catalog.indexer.db.model.Category.class, allCategoryIds);
         Cache<String, Cache<String, in.succinct.catalog.indexer.db.model.Payment>> appPaymentMap = createAppDbCache(in.succinct.catalog.indexer.db.model.Payment.class, allPaymentIds);
-        Cache<String, Cache<Long, in.succinct.catalog.indexer.db.model.Provider>> altProviderMap = new Cache<String, Cache<Long, in.succinct.catalog.indexer.db.model.Provider>>() {
+        Cache<String, Cache<Long, in.succinct.catalog.indexer.db.model.Provider>> altProviderMap = new Cache<>(0,0) {
             @Override
             protected Cache<Long, in.succinct.catalog.indexer.db.model.Provider> getValue(String subscriberId) {
-                return new Cache<Long, in.succinct.catalog.indexer.db.model.Provider>() {
+                return new Cache<>() {
                     @Override
                     protected in.succinct.catalog.indexer.db.model.Provider getValue(Long aLong) {
                         return null;
@@ -399,11 +425,7 @@ public class CatalogSearchEngine {
                 };
             }
         };
-        appProviderMap.forEach((s,c)-> {
-            c.forEach((oid, v) -> {
-                altProviderMap.get(s).put(v.getId(), v);
-            });
-        });
+        appProviderMap.forEach((s,c)-> c.forEach((oid, v) -> altProviderMap.get(s).put(v.getId(), v)));
 
         for (String subscriberId : allSubscriberIds) {
             Request reply = subscriberReplies.get(subscriberId);
