@@ -5,6 +5,7 @@ import com.venky.cache.UnboundedCache;
 import com.venky.core.string.StringUtil;
 import com.venky.core.util.ObjectHolder;
 import com.venky.core.util.ObjectUtil;
+import com.venky.geo.GeoCoordinate;
 import com.venky.swf.db.Database;
 import com.venky.swf.db.model.Model;
 import com.venky.swf.plugins.collab.db.model.config.City;
@@ -14,6 +15,7 @@ import com.venky.swf.sql.Conjunction;
 import com.venky.swf.sql.Expression;
 import com.venky.swf.sql.Operator;
 import com.venky.swf.sql.Select;
+import com.venky.swf.sql.parser.SQLExpressionParser.EQ;
 import in.succinct.beckn.BecknStrings;
 import in.succinct.beckn.Catalog;
 import in.succinct.beckn.Categories;
@@ -226,6 +228,38 @@ public class CatalogSearchEngine {
         }
         return categoryQ.toString();
     }
+    public String getLocationQuery(Request request){
+        Intent intent = request.getMessage().getIntent();
+        Descriptor intentDescriptor = intent == null ? null : intent.getDescriptor();
+
+        Location location = intent == null ? null : intent.getLocation();
+        GeoCoordinate coordinate = location == null ? null : location.getGps();
+
+        StringBuilder locationQ = new StringBuilder();
+        if (coordinate != null){
+            Select select = new Select().from(ProviderLocation.class);
+            select.where(new Expression(select.getPool(),Conjunction.AND).
+                    add(new Expression(select.getPool(),"MIN_LAT" , Operator.LE,coordinate.getLat())).
+                    add(new Expression(select.getPool(),"MAX_LAT" , Operator.GE,coordinate.getLat())).
+                    add(new Expression(select.getPool(),"MIN_LNG" , Operator.LE,coordinate.getLng())).
+                    add(new Expression(select.getPool(),"MAX_LNG" , Operator.GE,coordinate.getLng())));
+
+            List<ProviderLocation> providerLocations = select.execute();
+            if (!providerLocations.isEmpty()) {
+                locationQ.append("(");
+                for (ProviderLocation pl : providerLocations) {
+                    if (locationQ.length() > 1) {
+                        locationQ.append(" OR ");
+                    }
+                    locationQ.append(String.format("ID:%d", pl.getId()));
+                }
+                locationQ.append(")");
+            }else {
+                locationQ.append("ID:NULL");
+            }
+        }
+        return locationQ.toString();
+    }
 
     public String getItemQuery(Request request, ObjectHolder<Conjunction> conjunction) {
         Intent intent = request.getMessage().getIntent();
@@ -323,6 +357,7 @@ public class CatalogSearchEngine {
         IntentQuery providerQuery = new IntentQuery(getProviderQuery(request, providerConjunction),providerConjunction.get());
         IntentQuery categoryQuery = new IntentQuery(getCategoryQuery(request, categoryConjunction),categoryConjunction.get());
         IntentQuery itemQuery = new IntentQuery(getItemQuery(request,itemConjunction),itemConjunction.get());
+        IntentQuery locationQuery = new IntentQuery(getLocationQuery(request),Conjunction.AND);
         Map<Conjunction,List<IntentQuery>> queries = new UnboundedCache<>() {
             @Override
             protected List<IntentQuery> getValue(Conjunction key) {
@@ -331,7 +366,7 @@ public class CatalogSearchEngine {
         };
 
 
-        for (IntentQuery q : new IntentQuery[]{providerQuery,categoryQuery,itemQuery}) {
+        for (IntentQuery q : new IntentQuery[]{providerQuery,locationQuery,categoryQuery,itemQuery}) {
             if (q.present ) {
                 queries.get(q.conjunction).add(q);
             }
@@ -591,14 +626,9 @@ public class CatalogSearchEngine {
         replies.addAll(subscriberReplies.values());
     }
 
-    Map<String, Double> conversionFactor = new HashMap<>() {{
-        put("km", 1.0);
-        put("mile", 1.609344);
-    }};
 
     private double convertDistanceToKm(double distance, String fromUnit) {
-        double f = conversionFactor.get(StringUtil.singularize(fromUnit).toLowerCase());
-        return f * distance;
+        return DistanceUtil.convertDistanceToKm(distance,fromUnit);
     }
 
     private Descriptor normalizeDescriptor(Descriptor descriptor) {

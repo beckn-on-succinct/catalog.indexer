@@ -3,6 +3,7 @@ package in.succinct.catalog.indexer.configuration;
 import com.venky.swf.configuration.Installer;
 import com.venky.swf.db.model.Model;
 import com.venky.swf.db.model.reflection.ModelReflector;
+import com.venky.swf.sql.Conjunction;
 import com.venky.swf.sql.Expression;
 import com.venky.swf.sql.Operator;
 import com.venky.swf.sql.Select;
@@ -14,6 +15,7 @@ import in.succinct.catalog.indexer.db.model.Payment;
 import in.succinct.catalog.indexer.db.model.Provider;
 import in.succinct.catalog.indexer.db.model.ProviderLocation;
 
+import java.sql.Timestamp;
 import java.util.List;
 
 public class AppInstaller implements Installer {
@@ -24,7 +26,21 @@ public class AppInstaller implements Installer {
         migrate(Item.class);
         migrate(Payment.class);
         migrate(ProviderLocation.class);
+        fixServiceRegions();
     }
+
+    private void fixServiceRegions() {
+        Select select = new Select().from(ProviderLocation.class);
+        select.where(new Expression(select.getPool(), Conjunction.OR).
+                add(new Expression(select.getPool(),"MAX_LAT", Operator.EQ)).
+                add(new Expression(select.getPool(),"LAT", Operator.EQ)));
+        List<ProviderLocation> providerLocations = select.execute();
+        for (ProviderLocation pl : providerLocations){
+            pl.setUpdatedAt(new Timestamp(System.currentTimeMillis()));
+            pl.save();
+        }
+    }
+
 
     private <T extends Model & IndexedProviderModel> void migrate(Class<T> clazz) {
         ModelReflector<T> ref = ModelReflector.instance(clazz);
