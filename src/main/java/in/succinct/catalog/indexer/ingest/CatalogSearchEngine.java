@@ -251,11 +251,11 @@ public class CatalogSearchEngine {
                     if (locationQ.length() > 1) {
                         locationQ.append(" OR ");
                     }
-                    locationQ.append(String.format("ID:%d", pl.getId()));
+                    locationQ.append(String.format("LOCATION_IDS:\"%s\"", pl.getObjectId()));
                 }
                 locationQ.append(")");
             }else {
-                locationQ.append("ID:NULL");
+                locationQ.append("LOCATION_IDS:NULL");
             }
         }
         return locationQ.toString();
