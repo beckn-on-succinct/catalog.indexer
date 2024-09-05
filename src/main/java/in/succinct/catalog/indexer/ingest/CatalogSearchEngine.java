@@ -425,7 +425,7 @@ public class CatalogSearchEngine {
 
         sel.where(where);
 
-        List<in.succinct.catalog.indexer.db.model.Item> records = sel.where(where).execute(in.succinct.catalog.indexer.db.model.Item.class, 50);
+        List<in.succinct.catalog.indexer.db.model.Item> records = sel.where(where).execute(in.succinct.catalog.indexer.db.model.Item.class, subscriberMap.size() == 1 ? Select.MAX_RECORDS_ALL_RECORDS : 100);
 
         Set<String> allSubscriberIds = new HashSet<>();
         Set<String> allProviderIds = new HashSet<>();
