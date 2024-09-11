@@ -229,8 +229,10 @@ public class CatalogDigester implements Task {
                 }
                 item.getCategoryIds().getInner().sort((s1,s2)->((String)s1).compareTo((String)s2));
 
-                ensureProviderModel(in.succinct.catalog.indexer.db.model.Item.class, provider, active, item, (model, becknObject) -> {
 
+                ensureProviderModel(in.succinct.catalog.indexer.db.model.Item.class, provider,
+                        active && !ObjectUtil.equals(item.getTag("general_attributes","catalog.indexer.operation"),Operation.deactivate.toString()),
+                        item, (model, becknObject) -> {
                     model.setCategoryIds(item.getCategoryIds().toString());
                     model.setLocationIds(item.getLocationIds().toString());
                     model.setPaymentIds(item.getPaymentIds().toString());

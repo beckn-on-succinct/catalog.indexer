@@ -159,20 +159,8 @@ public class CatalogSearchEngine {
         Descriptor providerDescriptor = provider == null ? null : normalizeDescriptor(provider.getDescriptor());
 
         StringBuilder providerQ = new StringBuilder();
-        if (providerDescriptor != null || intentDescriptor != null) {
-            String desc = getDescription(providerDescriptor != null ? providerDescriptor : intentDescriptor);
 
-            providerQ.append(String.format(" ( %s ) ",
-                    q("PROVIDER", desc,false)));
-
-            if (providerDescriptor != null) {
-                conjunction.set(Conjunction.AND);
-            }
-        }
         if (provider != null && !ObjectUtil.isVoid(provider.getId())) {
-            if (providerQ.length() > 0) {
-                providerQ.append(" ").append(conjunction.get()).append(" ");
-            }
             provider.setId(provider.getId().trim());
             providerQ.append(q(in.succinct.catalog.indexer.db.model.Provider.class, record -> {
                 if (record != null) {
@@ -184,7 +172,17 @@ public class CatalogSearchEngine {
             }, "OBJECT_ID",provider.getId(),true));
 
             conjunction.set(Conjunction.AND);
+        }else if (providerDescriptor != null || intentDescriptor != null) {
+            String desc = getDescription(providerDescriptor != null ? providerDescriptor : intentDescriptor);
+
+            providerQ.append(String.format(" ( %s ) ",
+                    q("PROVIDER", desc,false)));
+
+            if (providerDescriptor != null) {
+                conjunction.set(Conjunction.AND);
+            }
         }
+
         if (providerQ.length() > 0) {
             providerQ.insert(0, "(");
             providerQ.append(")");
@@ -201,7 +199,11 @@ public class CatalogSearchEngine {
         Descriptor categoryDescriptor = category == null ? null : normalizeDescriptor(category.getDescriptor());
 
         StringBuilder categoryQ = new StringBuilder();
-        if (categoryDescriptor != null || intentDescriptor != null) {
+        if (category != null && !ObjectUtil.isVoid(category.getId())) {
+            category.setId(category.getId().trim());
+            categoryQ.append(String.format(" CATEGORY_IDS:%s",category.getId()));
+            conjunction.set(Conjunction.AND);
+        }else if (categoryDescriptor != null || intentDescriptor != null) {
             String desc = getDescription(categoryDescriptor != null ? categoryDescriptor : intentDescriptor);
             categoryQ.append(q(in.succinct.catalog.indexer.db.model.Category.class,record -> {
                 if (record != null) {
@@ -213,14 +215,6 @@ public class CatalogSearchEngine {
             if (categoryDescriptor != null) {
                 conjunction.set(Conjunction.AND);
             }
-        }
-        if (category != null && !ObjectUtil.isVoid(category.getId())) {
-            if (categoryQ.length() > 0) {
-                categoryQ.append(" ").append(conjunction.get()).append(" ");
-            }
-            category.setId(category.getId().trim());
-            categoryQ.append(String.format(" CATEGORY_IDS:%s",category.getId()));
-            conjunction.set(Conjunction.AND);
         }
         if (categoryQ.length() > 0) {
             categoryQ.insert(0, "(");
@@ -270,7 +264,11 @@ public class CatalogSearchEngine {
         Descriptor itemDescriptor = item == null ? null : normalizeDescriptor(item.getDescriptor());
 
         StringBuilder itemQ = new StringBuilder();
-        if (itemDescriptor != null || intentDescriptor != null) {
+        if (item != null && !ObjectUtil.isVoid(item.getId())) {
+            item.setId(item.getId().trim());
+            itemQ.append(q("OBJECT_ID", item.getId(),true));
+            conjunction.set(Conjunction.AND);
+        }else if (itemDescriptor != null || intentDescriptor != null) {
             String desc = getDescription(itemDescriptor != null ? itemDescriptor : intentDescriptor);
             itemQ.append(q("OBJECT_NAME", desc,false));
             if (itemDescriptor != null) {
@@ -278,14 +276,6 @@ public class CatalogSearchEngine {
             }
         }
 
-        if (item != null && !ObjectUtil.isVoid(item.getId())) {
-            if (itemQ.length() > 0) {
-                itemQ.append(" ").append(conjunction.get()).append(" ");
-            }
-            item.setId(item.getId().trim());
-            itemQ.append(q("OBJECT_ID", item.getId(),true));
-            conjunction.set(Conjunction.AND);
-        }
         if (itemQ.length() > 0) {
             itemQ.insert(0, "(");
             itemQ.append(")");
