@@ -15,7 +15,6 @@ import com.venky.swf.sql.Conjunction;
 import com.venky.swf.sql.Expression;
 import com.venky.swf.sql.Operator;
 import com.venky.swf.sql.Select;
-import com.venky.swf.sql.parser.SQLExpressionParser.EQ;
 import in.succinct.beckn.BecknStrings;
 import in.succinct.beckn.Catalog;
 import in.succinct.beckn.Categories;
@@ -50,7 +49,6 @@ import org.apache.lucene.search.Query;
 import org.json.simple.JSONObject;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -150,7 +148,7 @@ public class CatalogSearchEngine {
         return name.trim();
     }
 
-    public String getProviderQuery(Request request, ObjectHolder<Conjunction> conjunction) {
+    public String getProviderQuery(Request request, ObjectHolder<Conjunction> conjunction, ObjectHolder<Boolean> providerSpecific) {
         Intent intent = request.getMessage().getIntent();
         Descriptor intentDescriptor = intent == null ? null : intent.getDescriptor();
         conjunction.set(Conjunction.OR);
@@ -164,6 +162,7 @@ public class CatalogSearchEngine {
             provider.setId(provider.getId().trim());
             providerQ.append(q(in.succinct.catalog.indexer.db.model.Provider.class, record -> {
                 if (record != null) {
+                    providerSpecific.set(true);
                     return String.format(" PROVIDER_ID:%d ", record.getId());
                 }else {
                     return " PROVIDER_ID:NULL ";
@@ -341,13 +340,14 @@ public class CatalogSearchEngine {
         ObjectHolder<Conjunction> providerConjunction = new ObjectHolder<>(null);
         ObjectHolder<Conjunction> categoryConjunction = new ObjectHolder<>(null);
         ObjectHolder<Conjunction> itemConjunction = new ObjectHolder<>(null);
+        ObjectHolder<Boolean> providerSpecific = new ObjectHolder<>(false);
 
         List<IntentQuery> list = new ArrayList<>();
 
-        IntentQuery providerQuery = new IntentQuery(getProviderQuery(request, providerConjunction),providerConjunction.get());
+        IntentQuery providerQuery = new IntentQuery(getProviderQuery(request, providerConjunction,providerSpecific),providerConjunction.get());
         IntentQuery categoryQuery = new IntentQuery(getCategoryQuery(request, categoryConjunction),categoryConjunction.get());
         IntentQuery itemQuery = new IntentQuery(getItemQuery(request,itemConjunction),itemConjunction.get());
-        IntentQuery locationQuery = new IntentQuery(getLocationQuery(request),Conjunction.AND);
+        IntentQuery locationQuery = new IntentQuery(providerSpecific.get() ? ""  : getLocationQuery(request),Conjunction.AND);
         Map<Conjunction,List<IntentQuery>> queries = new UnboundedCache<>() {
             @Override
             protected List<IntentQuery> getValue(Conjunction key) {
@@ -584,7 +584,7 @@ public class CatalogSearchEngine {
                         if (end != null && end.getLocation() != null && end.getLocation().getGps() != null) {
                             Circle circle = storeLocation.getCircle();
                             includeItem = true;
-                            if (circle != null) {
+                            if (circle != null && !providerSpecific.get()) {
                                 if (circle.getGps() == null) {
                                     circle.setGps(storeLocation.getGps());
                                 }
