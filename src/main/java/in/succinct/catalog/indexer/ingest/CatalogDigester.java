@@ -9,7 +9,6 @@ import com.venky.swf.db.model.Model;
 import com.venky.swf.plugins.background.core.Task;
 import com.venky.swf.routing.Config;
 import in.succinct.beckn.BecknObject;
-import in.succinct.beckn.BecknObjectWithId;
 import in.succinct.beckn.BecknStrings;
 import in.succinct.beckn.Catalog;
 import in.succinct.beckn.Categories;
@@ -26,10 +25,12 @@ import in.succinct.beckn.Payment;
 import in.succinct.beckn.Payments;
 import in.succinct.beckn.Provider;
 import in.succinct.beckn.Providers;
+import in.succinct.beckn.TagGroup;
 import in.succinct.catalog.indexer.db.model.HasDescriptor;
 import in.succinct.catalog.indexer.db.model.IndexedActivatableModel;
 import in.succinct.catalog.indexer.db.model.IndexedProviderModel;
 import in.succinct.catalog.indexer.db.model.ProviderLocation;
+import in.succinct.catalog.indexer.db.model.ProviderTag;
 import org.json.simple.JSONObject;
 
 import java.util.HashMap;
@@ -165,6 +166,17 @@ public class CatalogDigester implements Task {
 
         provider = Database.getTable(in.succinct.catalog.indexer.db.model.Provider.class).getRefreshed(provider);
         provider.save();
+        for (TagGroup group : bProvider.getTags()){
+            for (TagGroup tag : group.getList()){
+                ProviderTag providerTag = Database.getTable(ProviderTag.class).newRecord();
+                providerTag.setProviderId(provider.getId());
+                providerTag.setTagGroupCode(group.getId());
+                providerTag.setTagCode(tag.getId());
+                providerTag.setTagValue(tag.getValue());
+                providerTag = Database.getTable(ProviderTag.class).getRefreshed(providerTag);
+                providerTag.save();
+            }
+        }
 
         //Map<String, in.succinct.catalog.indexer.db.model.Item> itemMap = createDbCache(in.succinct.catalog.indexer.db.model.Item.class,provider);
         Map<String, in.succinct.catalog.indexer.db.model.Category> categoryMap = createDbCache(in.succinct.catalog.indexer.db.model.Category.class,provider);

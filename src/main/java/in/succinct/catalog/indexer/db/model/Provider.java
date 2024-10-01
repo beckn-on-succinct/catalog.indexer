@@ -20,4 +20,5 @@ public interface Provider extends Model , IndexedSubscriberModel, HasDescriptor 
     List<Payment> getPayments();
     List<Category> getCategories();
     List<Item> getItems();
+    List<ProviderTag> getProviderTags();
 }

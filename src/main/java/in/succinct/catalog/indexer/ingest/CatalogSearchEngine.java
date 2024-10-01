@@ -148,7 +148,7 @@ public class CatalogSearchEngine {
         return name.trim();
     }
 
-    public String getProviderQuery(Request request, ObjectHolder<Conjunction> conjunction, ObjectHolder<Boolean> providerSpecific) {
+    public String getProviderQuery(Request request, ObjectHolder<Conjunction> conjunction, ObjectHolder<Boolean> providerSpecific , ObjectHolder<String> environment) {
         Intent intent = request.getMessage().getIntent();
         Descriptor intentDescriptor = intent == null ? null : intent.getDescriptor();
         conjunction.set(Conjunction.OR);
@@ -156,6 +156,8 @@ public class CatalogSearchEngine {
         Provider provider = intent == null ? null : intent.getProvider();
         Descriptor providerDescriptor = provider == null ? null : normalizeDescriptor(provider.getDescriptor());
 
+        String env = provider == null? null : provider.getTag("network","environment");
+        environment.set(env);
         StringBuilder providerQ = new StringBuilder();
 
         if (provider != null && !ObjectUtil.isVoid(provider.getId())) {
@@ -341,10 +343,11 @@ public class CatalogSearchEngine {
         ObjectHolder<Conjunction> categoryConjunction = new ObjectHolder<>(null);
         ObjectHolder<Conjunction> itemConjunction = new ObjectHolder<>(null);
         ObjectHolder<Boolean> providerSpecific = new ObjectHolder<>(false);
+        ObjectHolder<String> environment = new ObjectHolder<>(null);
 
         List<IntentQuery> list = new ArrayList<>();
 
-        IntentQuery providerQuery = new IntentQuery(getProviderQuery(request, providerConjunction,providerSpecific),providerConjunction.get());
+        IntentQuery providerQuery = new IntentQuery(getProviderQuery(request, providerConjunction,providerSpecific,environment),providerConjunction.get());
         IntentQuery categoryQuery = new IntentQuery(getCategoryQuery(request, categoryConjunction),categoryConjunction.get());
         IntentQuery itemQuery = new IntentQuery(getItemQuery(request,itemConjunction),itemConjunction.get());
         IntentQuery locationQuery = new IntentQuery(providerSpecific.get() ? ""  : getLocationQuery(request),Conjunction.AND);
@@ -413,7 +416,16 @@ public class CatalogSearchEngine {
             where.add(Expression.createExpression(sel.getPool(), "ID", Operator.IN, itemIds.toArray()));
         }
 
+
         sel.where(where);
+        StringBuilder extra = new StringBuilder();
+        extra.append(" and not exists (select 1 from provider_tags where provider_id = item.provider_id and tag_group_name = 'network' and tag_name = 'suspended' and tag_value = 'Y' )");
+        extra.append(" and not exists (select 1 from provider_tags where provider_id = item.provider_id and tag_group_name = 'kyc' and tag_name = 'complete' and tag_value = 'N' )");
+        if (environment.get() != null) {
+            extra.append(String.format(" and exists (select 1 from provider_tags where provider_id = item.provider_id and tag_group_name = 'network' and tag_name = 'environment' and tag_value = '%s' )",
+                    environment.get()));
+        }
+
 
         List<in.succinct.catalog.indexer.db.model.Item> records = sel.where(where).execute(in.succinct.catalog.indexer.db.model.Item.class, subscriberMap.size() == 1 ? Select.MAX_RECORDS_ALL_RECORDS : 100);
 
@@ -472,6 +484,23 @@ public class CatalogSearchEngine {
                 Provider outProvider = providers.get(dbProvider.getObjectId());
                 if (outProvider == null) {
                     outProvider = new Provider(dbProvider.getObjectJson());
+                    boolean providerIsSuspended = dbProvider.getReflector().getJdbcTypeHelper().getTypeRef(boolean.class).getTypeConverter().valueOf(outProvider.getTag("network","suspended"));
+                    String env = outProvider.getTag("network","environment");
+                    if (environment.get() != null && env != null && !ObjectUtil.equals(env,environment.get())){
+                        continue;
+                    }
+                    if (providerIsSuspended){
+                        continue;
+                    }
+                    String sKycComplete = outProvider.getTag("kyc","complete");
+
+                    boolean kycComplete = sKycComplete == null || dbProvider.getReflector().getJdbcTypeHelper().getTypeRef(boolean.class).getTypeConverter().valueOf(sKycComplete);
+                    if (!kycComplete){
+                        continue;
+                    }
+
+
+
                     Time time = new Time();
                     time.setLabel("enable");
                     time.setTimestamp(reply.getContext().getTimestamp());
@@ -580,6 +609,7 @@ public class CatalogSearchEngine {
 
                         boolean storeInCity = ObjectUtil.equals(city.getCode(), request.getContext().getCity()) || ObjectUtil.equals(request.getContext().getCity(), "*") || ObjectUtil.isVoid(request.getContext().getCity());
                         boolean includeItem = false;
+
 
                         if (end != null && end.getLocation() != null && end.getLocation().getGps() != null) {
                             Circle circle = storeLocation.getCircle();
