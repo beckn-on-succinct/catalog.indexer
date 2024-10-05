@@ -420,7 +420,7 @@ public class CatalogSearchEngine {
         sel.where(where);
         StringBuilder extra = new StringBuilder();
         extra.append(" and not exists (select 1 from provider_tags where provider_id = items.provider_id and tag_group_code = 'network' and tag_code = 'suspended' and tag_value = 'Y' )");
-        extra.append(" and not exists (select 1 from provider_tags where provider_id = items.provider_id and tag_group_code = 'kyc' and tag_code = 'complete' and tag_value = 'N' )");
+        extra.append(" and not exists (select 1 from provider_tags where provider_id = items.provider_id and tag_group_code = 'kyc' and tag_code = 'ok' and tag_value = 'N' )");
         if (environment.get() != null) {
             extra.append(String.format(" and exists (select 1 from provider_tags where provider_id = items.provider_id and tag_group_code = 'network' and tag_code = 'environment' and tag_value = '%s' )",
                     environment.get()));
@@ -492,10 +492,10 @@ public class CatalogSearchEngine {
                     if (providerIsSuspended){
                         continue;
                     }
-                    String sKycComplete = outProvider.getTag("kyc","complete");
+                    String sKycOk = outProvider.getTag("kyc","ok");
 
-                    boolean kycComplete = sKycComplete == null || dbProvider.getReflector().getJdbcTypeHelper().getTypeRef(boolean.class).getTypeConverter().valueOf(sKycComplete);
-                    if (!kycComplete){
+                    boolean kycOk = sKycOk == null || dbProvider.getReflector().getJdbcTypeHelper().getTypeRef(boolean.class).getTypeConverter().valueOf(sKycOk);
+                    if (!kycOk){
                         continue;
                     }
 
