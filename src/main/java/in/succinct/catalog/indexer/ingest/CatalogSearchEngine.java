@@ -409,7 +409,7 @@ public class CatalogSearchEngine {
 
         Select sel = new Select().from(in.succinct.catalog.indexer.db.model.Item.class);
         Expression where = new Expression(sel.getPool(), Conjunction.AND);
-        where.add(new Expression(sel.getPool(), "ACTIVE", Operator.EQ, true));
+        //where.add(new Expression(sel.getPool(), "ACTIVE", Operator.EQ, true));
         where.add(new Expression(sel.getPool(), "SUBSCRIBER_ID", Operator.IN, subscriberMap.keySet().toArray(new String[]{})));
 
         if (!itemIds.isEmpty()) {
