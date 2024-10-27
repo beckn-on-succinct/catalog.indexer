@@ -1,7 +1,6 @@
 package in.succinct.catalog.indexer.ingest;
 
 import com.venky.cache.Cache;
-import com.venky.core.string.StringUtil;
 import com.venky.core.util.ObjectUtil;
 import com.venky.swf.db.Database;
 import com.venky.swf.db.JdbcTypeHelper.TypeConverter;
@@ -26,11 +25,14 @@ import in.succinct.beckn.Payments;
 import in.succinct.beckn.Provider;
 import in.succinct.beckn.Providers;
 import in.succinct.beckn.TagGroup;
+import in.succinct.beckn.TagGroupHolder;
+import in.succinct.beckn.Xinput.Index;
 import in.succinct.catalog.indexer.db.model.HasDescriptor;
 import in.succinct.catalog.indexer.db.model.IndexedActivatableModel;
 import in.succinct.catalog.indexer.db.model.IndexedProviderModel;
 import in.succinct.catalog.indexer.db.model.ProviderLocation;
 import in.succinct.catalog.indexer.db.model.ProviderTag;
+import org.apache.poi.sl.draw.geom.GuideIf.Op;
 import org.json.simple.JSONObject;
 
 import java.util.HashMap;
@@ -38,19 +40,8 @@ import java.util.Map;
 
 @SuppressWarnings("unused")
 public class CatalogDigester implements Task {
-    public static class DigestRule  {
-        private final boolean clearCatalogBeforeOperation;
-        private final Operation operation;
-        public DigestRule(Operation operation){
-            this(operation,false);
-        }
-        public DigestRule(Operation operation, boolean clearCatalogBeforeOperation){
-            this.operation = operation;
-            this.clearCatalogBeforeOperation = clearCatalogBeforeOperation;
-        }
-
-    }
     public enum Operation {
+        delete,
         deactivate,
         activate,
     }
@@ -73,17 +64,11 @@ public class CatalogDigester implements Task {
             Boolean reset = booleanTypeConverter.
                     valueOf(provider.getTags().getTag("general_attributes","catalog.indexer.reset"));
 
-            String operation = StringUtil.
-                    valueOf(provider.getTags().getTag("general_attributes","catalog.indexer.operation"));
-            if (!ObjectUtil.equals(operation,Operation.deactivate.name())){
-                operation = Operation.activate.name();
-            }
-            DigestRule digestRule = new DigestRule(Operation.valueOf(operation),reset);
 
-            if (digestRule.clearCatalogBeforeOperation) {
+            if (reset) {
                 destroy(provider);
             }
-            ensureProvider(provider, digestRule.operation == Operation.activate);
+            ensureProvider(provider);
         }
     }
     private void destroy(Provider bProvider){
@@ -148,7 +133,7 @@ public class CatalogDigester implements Task {
     }
 
     @SuppressWarnings("unchecked")
-    public void ensureProvider(Provider bProvider, boolean active){
+    public void ensureProvider(Provider bProvider){
 
         Config.instance().getLogger(getClass().getName()).info("CatalogDigester: items size: " + bProvider.getItems().size());
         Items items = bProvider.getItems();bProvider.rm("items");
@@ -189,14 +174,14 @@ public class CatalogDigester implements Task {
         if (categories != null){
             for (int j = 0 ; j < categories.size() ; j++){
                 Category category = categories.get(j);
-                in.succinct.catalog.indexer.db.model.Category model = ensureProviderModel(in.succinct.catalog.indexer.db.model.Category.class,provider,active,category);
+                in.succinct.catalog.indexer.db.model.Category model = ensureProviderModel(in.succinct.catalog.indexer.db.model.Category.class,provider,category,null);
                 categoryMap.put(model.getObjectId(),model);
             }
         }
         if (fulfillments != null) {
             for (int j = 0; j < fulfillments.size(); j++) {
                 Fulfillment fulfillment = fulfillments.get(j);
-                in.succinct.catalog.indexer.db.model.Fulfillment model = ensureProviderModel(in.succinct.catalog.indexer.db.model.Fulfillment.class, provider, active, fulfillment,(fulfillmentModel, fulfillmentBecknObject) -> fulfillmentModel.setObjectName(fulfillmentBecknObject.getType()));
+                in.succinct.catalog.indexer.db.model.Fulfillment model = ensureProviderModel(in.succinct.catalog.indexer.db.model.Fulfillment.class, provider,  fulfillment,(fulfillmentModel, fulfillmentBecknObject) -> fulfillmentModel.setObjectName(fulfillmentBecknObject.getType()));
                 fulfillmentMap.put(model.getObjectId(), model);
             }
         }
@@ -210,7 +195,7 @@ public class CatalogDigester implements Task {
         if (locations != null) {
             for (int j = 0; j < locations.size(); j++) {
                 Location location = locations.get(j);
-                ProviderLocation model = ensureProviderModel(ProviderLocation.class, provider, active, location,(pl, l) -> pl.setObjectName(l.getDescriptor().getName()));
+                ProviderLocation model = ensureProviderModel(ProviderLocation.class, provider, location,(pl, l) -> pl.setObjectName(l.getDescriptor().getName()));
                 providerLocationMap.put(model.getObjectId(), model);
             }
         }
@@ -243,7 +228,6 @@ public class CatalogDigester implements Task {
 
 
                 ensureProviderModel(in.succinct.catalog.indexer.db.model.Item.class, provider,
-                        active && !ObjectUtil.equals(item.getTag("general_attributes","catalog.indexer.operation"),Operation.deactivate.toString()),
                         item, (model, becknObject) -> {
                     model.setCategoryIds(item.getCategoryIds().toString());
                     model.setLocationIds(item.getLocationIds().toString());
@@ -267,12 +251,9 @@ public class CatalogDigester implements Task {
         return payment;
     }
 
-    private <T extends Model & IndexedProviderModel>  T ensureProviderModel(Class<T> modelClass, in.succinct.catalog.indexer.db.model.Provider provider, boolean active, BecknObject becknObject){
-        return ensureProviderModel(modelClass,provider,active,becknObject,null);
-    }
 
     @SuppressWarnings("unchecked")
-    private <T extends Model & IndexedProviderModel, B extends BecknObject>  T ensureProviderModel(Class<T> modelClass, in.succinct.catalog.indexer.db.model.Provider provider, boolean active,
+    private <T extends Model & IndexedProviderModel, B extends BecknObject>  T ensureProviderModel(Class<T> modelClass, in.succinct.catalog.indexer.db.model.Provider provider,
                                                                                                    B becknObject, Visitor<T,B> visitor){
         T model =  Database.getTable(modelClass).newRecord();
         model.setSubscriberId(provider.getSubscriberId());
@@ -281,9 +262,6 @@ public class CatalogDigester implements Task {
         Descriptor descriptor = becknObject.get(Descriptor.class,"descriptor");
         if (descriptor != null) {
             model.setObjectName(descriptor.getName());
-        }
-        if (model instanceof IndexedActivatableModel){
-            ((IndexedActivatableModel)model).setActive(active);
         }
         if (visitor != null){
             visitor.visit(model,becknObject);
@@ -297,7 +275,29 @@ public class CatalogDigester implements Task {
         }
         finalObjectJson.getInner().putAll(becknObject.getInner()); //minimal
         model.setObjectJson(finalObjectJson.getInner().toString());
-        model.save();
+
+        Operation operation = Operation.activate;
+
+        if (becknObject instanceof TagGroupHolder){
+            TagGroupHolder tagGroupHolder = (TagGroupHolder) becknObject;
+            String op = tagGroupHolder.getTag("general_attributes","catalog.indexer.operation");
+            if (!ObjectUtil.isVoid(op)){
+                operation = Operation.valueOf(op);
+            }
+        }
+        if (model instanceof IndexedActivatableModel) {
+            if (operation == Operation.activate) {
+                ((IndexedActivatableModel) model).setActive(true);
+            } else if (operation == Operation.deactivate) {
+                ((IndexedActivatableModel) model).setActive(false);
+            }
+        }
+
+        if (operation == Operation.delete){
+            model.destroy();
+        }else {
+            model.save();
+        }
         return model;
     }
 

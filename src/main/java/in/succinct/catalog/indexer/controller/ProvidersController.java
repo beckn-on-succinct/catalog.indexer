@@ -65,21 +65,6 @@ public class ProvidersController extends ModelController<in.succinct.catalog.ind
     public View ingest() throws Exception{
         ensureIntegrationMethod(HttpMethod.POST);
         Request request = new Request((JSONObject) JSONValue.parseWithException(new InputStreamReader(getPath().getInputStream())));
-        for (Provider provider : request.getMessage().getCatalog().getProviders()){
-            String reset = provider.getTag("general_attributes","catalog.indexer.reset");
-            String operation = provider.getTag("general_attributes","catalog.indexer.operation");
-
-            if (ObjectUtil.isVoid(reset)){
-                if (ObjectUtil.isVoid(operation)) {
-                    provider.setTag("general_attributes","catalog.indexer.reset","Y");
-                }else {
-                    provider.setTag("general_attributes","catalog.indexer.reset","N");
-                }
-            }
-            if (ObjectUtil.isVoid(operation)) {
-                provider.setTag("general_attributes", "catalog.indexer.operation", Operation.activate.name());
-            }
-        }
         CatalogDigester digester = new CatalogDigester(request.getContext(),request.getMessage().getCatalog());
         TaskManager.instance().executeAsync(digester,false);
         return getReturnIntegrationAdaptor().createStatusResponse(getPath(),null);
