@@ -9,12 +9,14 @@ import com.venky.geo.GeoCoordinate;
 import com.venky.swf.db.Database;
 import com.venky.swf.db.model.Model;
 import com.venky.swf.plugins.collab.db.model.config.City;
+import com.venky.swf.plugins.collab.util.BoundingBox;
 import com.venky.swf.plugins.lucene.index.LuceneIndexer;
 import com.venky.swf.routing.Config;
 import com.venky.swf.sql.Conjunction;
 import com.venky.swf.sql.Expression;
 import com.venky.swf.sql.Operator;
 import com.venky.swf.sql.Select;
+import com.venky.swf.sql.parser.SQLExpressionParser.EQ;
 import in.succinct.beckn.BecknStrings;
 import in.succinct.beckn.Catalog;
 import in.succinct.beckn.Categories;
@@ -22,6 +24,7 @@ import in.succinct.beckn.Category;
 import in.succinct.beckn.Circle;
 import in.succinct.beckn.Context;
 import in.succinct.beckn.Descriptor;
+import in.succinct.beckn.Fulfillment.RetailFulfillmentType;
 import in.succinct.beckn.FulfillmentStop;
 import in.succinct.beckn.Fulfillments;
 import in.succinct.beckn.Images;
@@ -49,6 +52,7 @@ import org.apache.lucene.search.Query;
 import org.json.simple.JSONObject;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -232,21 +236,57 @@ public class CatalogSearchEngine {
 
         StringBuilder locationQ = new StringBuilder();
         if (coordinate != null){
-            Select select = new Select().from(ProviderLocation.class);
-            select.where(new Expression(select.getPool(),Conjunction.AND).
-                    add(new Expression(select.getPool(),"MIN_LAT" , Operator.LE,coordinate.getLat())).
-                    add(new Expression(select.getPool(),"MAX_LAT" , Operator.GE,coordinate.getLat())).
-                    add(new Expression(select.getPool(),"MIN_LNG" , Operator.LE,coordinate.getLng())).
-                    add(new Expression(select.getPool(),"MAX_LNG" , Operator.GE,coordinate.getLng())));
+            Select home_delivery_select = new Select().from(ProviderLocation.class);
 
-            List<ProviderLocation> providerLocations = select.execute();
-            if (!providerLocations.isEmpty()) {
+            home_delivery_select.where(new Expression(home_delivery_select.getPool(),Conjunction.AND).
+                                add(new Expression(home_delivery_select.getPool(),"MIN_LAT" , Operator.LE,coordinate.getLat())).
+                                add(new Expression(home_delivery_select.getPool(),"MAX_LAT" , Operator.GE,coordinate.getLat())).
+                                add(new Expression(home_delivery_select.getPool(),"MIN_LNG" , Operator.LE,coordinate.getLng())).
+                                add(new Expression(home_delivery_select.getPool(),"MAX_LNG" , Operator.GE,coordinate.getLng()))
+            );
+            List<ProviderLocation> providerLocations = home_delivery_select.execute();
+            Set<String> locationIds = new HashSet<>();
+            for (ProviderLocation providerLocation : providerLocations) {
+                locationIds.add(providerLocation.getObjectId());
+            }
+
+            BoundingBox bb  = new BoundingBox(coordinate,1,10); //Hardcoded buyer geo fence 10 kms
+            List<ProviderLocation> buyerGeoFenceBasedList = bb.find(ProviderLocation.class,0);
+
+            Map<Long,Set<String>> providerIdLocationMap = new UnboundedCache<Long, Set<String>>() {
+                @Override
+                protected Set<String> getValue(Long key) {
+                    return new HashSet<>();
+                }
+            };
+            for (ProviderLocation providerLocation : buyerGeoFenceBasedList) {
+                providerIdLocationMap.get(providerLocation.getProviderId()).add(providerLocation.getObjectId());
+            }
+
+            if (!providerIdLocationMap.isEmpty()) {
+                Select providerSupportingStorePickup = new Select().from(Fulfillment.class);
+                providerSupportingStorePickup.where(new Expression(providerSupportingStorePickup.getPool(),Conjunction.AND).
+                        add(new Expression(providerSupportingStorePickup.getPool(), "OBJECT_ID", Operator.EQ, RetailFulfillmentType.store_pickup.toString())).
+                        add(new Expression(providerSupportingStorePickup.getPool(), "PROVIDER_ID", Operator.IN, providerIdLocationMap.keySet().toArray())));
+
+                Set<Long> providerIds = new HashSet<>();
+                for (Fulfillment f : providerSupportingStorePickup.execute(Fulfillment.class)){
+                    providerIds.add(f.getProviderId());
+                }
+                for (Map.Entry<Long,Set<String>> e : providerIdLocationMap.entrySet()){
+                    if (providerIds.contains(e.getKey())){
+                        locationIds.addAll(e.getValue());
+                    }
+                }
+            }
+
+            if (!locationIds.isEmpty()) {
                 locationQ.append("(");
-                for (ProviderLocation pl : providerLocations) {
+                for (String lId : locationIds) {
                     if (locationQ.length() > 1) {
                         locationQ.append(" OR ");
                     }
-                    locationQ.append(String.format("LOCATION_IDS:\"%s\"", pl.getObjectId()));
+                    locationQ.append(String.format("LOCATION_IDS:\"%s\"", lId));
                 }
                 locationQ.append(")");
             }else {
@@ -613,23 +653,32 @@ public class CatalogSearchEngine {
 
                         if (end != null && end.getLocation() != null && end.getLocation().getGps() != null) {
                             Circle circle = storeLocation.getCircle();
-                            includeItem = true;
-                            if (circle != null && !providerSpecific.get()) {
+                            if (providerSpecific.get() || circle == null){
+                                includeItem = true;
+                            }else {
                                 if (circle.getGps() == null) {
                                     circle.setGps(storeLocation.getGps());
                                 }
-                                if (circle.getGps() != null && circle.getRadius() != null && circle.getRadius().getValue() > 0) {
-                                    Scalar radius = circle.getRadius();
-                                    if (ObjectUtil.isVoid(radius.getUnit())) {
-                                        radius.setUnit("km");
-                                    }
-                                    double distance = radius.getValue();
-                                    if (!radius.getUnit().equalsIgnoreCase("km")) {
-                                        distance = convertDistanceToKm(distance, radius.getUnit());
-                                    }
-                                    if (circle.getGps().distanceTo(end.getLocation().getGps()) > distance) {
-                                        includeItem = false;
-                                    }
+                                Scalar radius = circle.getRadius();
+
+                                if (radius == null){
+                                    radius = new Scalar(){{
+                                        setValue(0);
+                                    }};
+                                    circle.setRadius(radius);
+                                }
+                                if (ObjectUtil.isVoid(radius.getUnit())) {
+                                    radius.setUnit("km");
+                                }
+                                double radiusValue = radius.getValue();
+                                if (!radius.getUnit().equalsIgnoreCase("km")) {
+                                    radiusValue = convertDistanceToKm(radiusValue, radius.getUnit());
+                                }
+                                double distance = circle.getGps().distanceTo(end.getLocation().getGps());
+                                if (distance == 0 ) {
+                                    includeItem = true; //This is to show inactive items for sellers who query by store location.
+                                }else if (distance <= radiusValue) {
+                                    includeItem = dbItem.isActive();
                                 }
                             }
                         } else if (end == null && storeInCity) {
