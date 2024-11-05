@@ -184,6 +184,11 @@ public class CatalogDigester implements Task {
                 in.succinct.catalog.indexer.db.model.Fulfillment model = ensureProviderModel(in.succinct.catalog.indexer.db.model.Fulfillment.class, provider,  fulfillment,(fulfillmentModel, fulfillmentBecknObject) -> fulfillmentModel.setObjectName(fulfillmentBecknObject.getType()));
                 fulfillmentMap.put(model.getObjectId(), model);
             }
+            provider.getFulfillments().forEach(f->{
+                if (!fulfillmentMap.containsKey(f.getObjectId())){
+                    f.destroy(); // Fulfillments are always sent completely.
+                }
+            });
         }
         if (payments != null) {
             for (int j = 0; j < payments.size(); j++) {
@@ -191,6 +196,11 @@ public class CatalogDigester implements Task {
                 in.succinct.catalog.indexer.db.model.Payment model = ensurePayment(provider, payment);
                 paymentMap.put(model.getObjectId(), model);
             }
+            provider.getPayments().forEach(p->{
+                if (!paymentMap.containsKey(p.getObjectId())){
+                    p.destroy();// Payments are always sent completely. so missing ones have to be deleted.
+                }
+            });
         }
         if (locations != null) {
             for (int j = 0; j < locations.size(); j++) {
