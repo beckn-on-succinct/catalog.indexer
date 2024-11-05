@@ -4,9 +4,11 @@ import com.venky.core.util.ObjectUtil;
 import com.venky.geo.GeoCoordinate;
 import com.venky.swf.db.extensions.ModelOperationExtension;
 import com.venky.swf.plugins.collab.util.BoundingBox;
+import in.succinct.beckn.BecknStrings;
 import in.succinct.beckn.Circle;
 import in.succinct.beckn.Location;
 import in.succinct.beckn.Scalar;
+import in.succinct.catalog.indexer.db.model.Payment;
 import in.succinct.catalog.indexer.db.model.ProviderLocation;
 import in.succinct.catalog.indexer.ingest.DistanceUtil;
 
@@ -47,6 +49,19 @@ public class ProviderLocationExtension extends ModelOperationExtension<ProviderL
         instance.setMinLng(min.getLng());
         instance.setMaxLat(max.getLat());
         instance.setMaxLng(max.getLng());
+    }
+
+    @Override
+    protected void afterDestroy(ProviderLocation instance) {
+        super.afterDestroy(instance);
+        instance.getProvider().getItems().forEach((item)->{
+            BecknStrings locationIds  = BecknStrings.parse(item.getLocationIds());
+            if (locationIds.getInnerArray().contains(instance.getObjectId())){
+                locationIds.remove(instance.getObjectId());
+            }
+            item.setLocationIds(locationIds.toString());
+            item.save();
+        });
     }
 
 
