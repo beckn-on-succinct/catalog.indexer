@@ -616,22 +616,19 @@ public class CatalogSearchEngine {
                 }
                 if (items.get(dbItem.getObjectId()) == null) {
                     Item outItem = new Item((JSONObject) JSONAwareWrapper.parse(dbItem.getObjectJson()));
-                    if (!outItem.getFulfillmentIds().isEmpty()) {
-                        outItem.setFulfillmentId(outItem.getFulfillmentIds().get(0));
-                    }
-                    if (!outItem.getLocationIds().isEmpty()) {
-                        outItem.setLocationId(outItem.getLocationIds().get(0));
-                    }
                     outItem.setTime(new Time());
                     outItem.getTime().setLabel(dbItem.isActive() ? "enable" : "disable");
                     outItem.getTime().setTimestamp(dbItem.getUpdatedAt());
-                    String outFulfillmentType = fulfillments.get(outItem.getFulfillmentId()).getType();
+                    //String outFulfillmentType = fulfillments.get(outItem.getFulfillmentId()).getType();
                     String inFulfillmentType = intentFulfillment == null ? null : intentFulfillment.getType();
+                    boolean requestedFulfillmentTypeSupported = isFulfillmentTypeSuppored ( inFulfillmentType, fulfillments);
+
+
                     FulfillmentStop end = intentFulfillment == null ? (intent.getLocation() == null ? null : new FulfillmentStop() {{
                         setLocation(intent.getLocation());
                     }}) : intentFulfillment.getEnd();
 
-                    if (inFulfillmentType == null || outFulfillmentType.matches(inFulfillmentType)) {
+                    if (requestedFulfillmentTypeSupported) {
 
                         outItem.setMatched(true);
                         outItem.setRelated(true);
@@ -644,55 +641,90 @@ public class CatalogSearchEngine {
                         itemQuantity.setMaximum(available);
                         outItem.setItemQuantity(itemQuantity);
 
-                        Location storeLocation = locations.get(outItem.getLocationId());
-                        City city = City.findByCountryAndStateAndName(storeLocation.getAddress().getCountry(), storeLocation.getAddress().getState(), storeLocation.getAddress().getCity());
+                        for (String locationId : outItem.getLocationIds()){
 
-                        boolean storeInCity = ObjectUtil.equals(city.getCode(), request.getContext().getCity()) || ObjectUtil.equals(request.getContext().getCity(), "*") || ObjectUtil.isVoid(request.getContext().getCity());
-                        boolean includeItem = false;
+                            Location storeLocation = locations.get(locationId);
+                            City city = City.findByCountryAndStateAndName(storeLocation.getAddress().getCountry(), storeLocation.getAddress().getState(), storeLocation.getAddress().getCity());
+
+                            boolean storeInCity = ObjectUtil.equals(city.getCode(), request.getContext().getCity()) || ObjectUtil.equals(request.getContext().getCity(), "*") || ObjectUtil.isVoid(request.getContext().getCity());
+                            boolean includeItem = false;
 
 
-                        if (end != null && end.getLocation() != null && end.getLocation().getGps() != null) {
-                            Circle circle = storeLocation.getCircle();
-                            if (providerSpecific.get() || circle == null){
+                            if (end != null && end.getLocation() != null && end.getLocation().getGps() != null) {
+                                for (String fId: outItem.getFulfillmentIds()) {
+                                    in.succinct.beckn.Fulfillment fulfillment = fulfillments.get(fId);
+                                    if (RetailFulfillmentType.valueOf(fulfillment.getType()) == RetailFulfillmentType.store_pickup) {
+                                        includeItem = true;
+                                    } else if (RetailFulfillmentType.valueOf(fulfillment.getType()) == RetailFulfillmentType.home_delivery){
+                                        Circle circle = storeLocation.getCircle();
+                                        if (providerSpecific.get() || circle == null) {
+                                            includeItem = true;
+                                        } else {
+                                            if (circle.getGps() == null) {
+                                                circle.setGps(storeLocation.getGps());
+                                            }
+                                            Scalar radius = circle.getRadius();
+
+                                            if (radius == null) {
+                                                radius = new Scalar() {{
+                                                    setValue(0);
+                                                }};
+                                                circle.setRadius(radius);
+                                            }
+                                            if (ObjectUtil.isVoid(radius.getUnit())) {
+                                                radius.setUnit("km");
+                                            }
+                                            double radiusValue = radius.getValue();
+                                            if (!radius.getUnit().equalsIgnoreCase("km")) {
+                                                radiusValue = convertDistanceToKm(radiusValue, radius.getUnit());
+                                            }
+                                            double distance = circle.getGps().distanceTo(end.getLocation().getGps());
+                                            if (distance == 0) {
+                                                includeItem = true; //This is to show inactive items for sellers who query by store location.
+                                            } else if (distance <= radiusValue) {
+                                                includeItem = dbItem.isActive();
+                                            }
+                                        }
+                                    }
+                                    if (includeItem){
+                                        break;
+                                    }
+                                }
+
+                            } else if (end == null && storeInCity) {
                                 includeItem = true;
-                            }else {
-                                if (circle.getGps() == null) {
-                                    circle.setGps(storeLocation.getGps());
-                                }
-                                Scalar radius = circle.getRadius();
-
-                                if (radius == null){
-                                    radius = new Scalar(){{
-                                        setValue(0);
-                                    }};
-                                    circle.setRadius(radius);
-                                }
-                                if (ObjectUtil.isVoid(radius.getUnit())) {
-                                    radius.setUnit("km");
-                                }
-                                double radiusValue = radius.getValue();
-                                if (!radius.getUnit().equalsIgnoreCase("km")) {
-                                    radiusValue = convertDistanceToKm(radiusValue, radius.getUnit());
-                                }
-                                double distance = circle.getGps().distanceTo(end.getLocation().getGps());
-                                if (distance == 0 ) {
-                                    includeItem = true; //This is to show inactive items for sellers who query by store location.
-                                }else if (distance <= radiusValue) {
-                                    includeItem = dbItem.isActive();
-                                }
                             }
-                        } else if (end == null && storeInCity) {
-                            includeItem = true;
+                            if (includeItem ) {
+                                if (items.get(outItem.getId()) == null) {
+                                    items.add(outItem);
+                                    reply.setSuppressed(false);
+                                }
+                            }else {
+                                outItem.getLocationIds().remove(locationId);
+                            }
                         }
-                        if (includeItem) {
-                            items.add(outItem);
-                            reply.setSuppressed(false);
-                        }
+
+
                     }
                 }
             }
         }
         replies.addAll(subscriberReplies.values());
+    }
+
+    private boolean isFulfillmentTypeSuppored(String inFulfillmentType, Fulfillments fulfillments) {
+        boolean supported = true;
+
+        if (inFulfillmentType != null) {
+            supported = false;
+            for (in.succinct.beckn.Fulfillment fulfillment : fulfillments) {
+                if (ObjectUtil.equals(fulfillment.getType(), inFulfillmentType)) {
+                    supported = true ;
+                    break;
+                }
+            }
+        }
+        return supported;
     }
 
 

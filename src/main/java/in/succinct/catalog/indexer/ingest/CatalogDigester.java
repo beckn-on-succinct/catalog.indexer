@@ -68,7 +68,9 @@ public class CatalogDigester implements Task {
             if (reset) {
                 destroy(provider);
             }
-            ensureProvider(provider);
+            if (!reset || !ObjectUtil.isVoid(provider.getDescriptor().getName())) {
+                ensureProvider(provider);
+            }
         }
     }
     private void destroy(Provider bProvider){
