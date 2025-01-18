@@ -16,7 +16,6 @@ import com.venky.swf.sql.Conjunction;
 import com.venky.swf.sql.Expression;
 import com.venky.swf.sql.Operator;
 import com.venky.swf.sql.Select;
-import com.venky.swf.sql.parser.SQLExpressionParser.EQ;
 import in.succinct.beckn.BecknStrings;
 import in.succinct.beckn.Catalog;
 import in.succinct.beckn.Categories;
@@ -44,6 +43,7 @@ import in.succinct.beckn.Scalar;
 import in.succinct.beckn.Subscriber;
 import in.succinct.beckn.Time;
 import in.succinct.catalog.indexer.db.model.Fulfillment;
+import in.succinct.catalog.indexer.db.model.IndexedProviderModel;
 import in.succinct.catalog.indexer.db.model.IndexedSubscriberModel;
 import in.succinct.catalog.indexer.db.model.Payment;
 import in.succinct.catalog.indexer.db.model.ProviderLocation;
@@ -52,7 +52,6 @@ import org.apache.lucene.search.Query;
 import org.json.simple.JSONObject;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -334,6 +333,96 @@ public class CatalogSearchEngine {
         boolean present;
         Conjunction conjunction;
     }
+    public List<in.succinct.catalog.indexer.db.model.Item> getItems(Request request, ObjectHolder<Boolean> providerSpecific, ObjectHolder<String> environment){
+
+        ObjectHolder<Conjunction> providerConjunction = new ObjectHolder<>(null);
+        ObjectHolder<Conjunction> categoryConjunction = new ObjectHolder<>(null);
+        ObjectHolder<Conjunction> itemConjunction = new ObjectHolder<>(null);
+        
+        List<IntentQuery> list = new ArrayList<>();
+        
+        IntentQuery providerQuery = new IntentQuery(getProviderQuery(request, providerConjunction,providerSpecific,environment),providerConjunction.get());
+        IntentQuery categoryQuery = new IntentQuery(getCategoryQuery(request, categoryConjunction),categoryConjunction.get());
+        IntentQuery itemQuery = new IntentQuery(getItemQuery(request,itemConjunction),itemConjunction.get());
+        IntentQuery locationQuery = new IntentQuery(providerSpecific.get() ? ""  : getLocationQuery(request),Conjunction.AND);
+        Map<Conjunction,List<IntentQuery>> queries = new UnboundedCache<>() {
+            @Override
+            protected List<IntentQuery> getValue(Conjunction key) {
+                return new ArrayList<>();
+            }
+        };
+        
+        
+        for (IntentQuery q : new IntentQuery[]{providerQuery,locationQuery,categoryQuery,itemQuery}) {
+            if (q.present ) {
+                queries.get(q.conjunction).add(q);
+            }
+        }
+        StringBuilder q = new StringBuilder();
+        for (IntentQuery intentQuery : queries.get(Conjunction.AND)) {
+            if (q.length() > 0){
+                q.append(" AND ");
+            }
+            q.append(intentQuery.query);
+        }
+        StringBuilder orQ = new StringBuilder();
+        for (IntentQuery intentQuery : queries.get(Conjunction.OR)) {
+            if (orQ.length() > 0){
+                orQ.append(" OR ");
+            }
+            orQ.append(intentQuery.query);
+        }
+        
+        if (q.length() > 0){
+            if (orQ.length() > 0) {
+                q.append(" AND (");
+                q.append(orQ);
+                q.append(")");
+            }
+        }else {
+            q.append(orQ);
+        }
+        if (q.length() > 0 ){
+            q.insert(0,"(");
+            q.append(")");
+        }
+        
+        List<Long> itemIds = new ArrayList<>();
+        if (!ObjectUtil.isVoid(q.toString())) {
+            LuceneIndexer indexer = LuceneIndexer.instance(in.succinct.catalog.indexer.db.model.Item.class);
+            Query query = indexer.constructQuery(q.toString());
+            Config.instance().getLogger(getClass().getName()).info("Searching for /items/search/" + q);
+            itemIds = indexer.findIds(query, 0);
+            Config.instance().getLogger(getClass().getName()).info("SearchAdaptor: Query result size: " + itemIds.size());
+            if (itemIds.isEmpty()) {
+                return new ArrayList<>();
+            }
+        }
+        
+        
+        
+        Select sel = new Select().from(in.succinct.catalog.indexer.db.model.Item.class);
+        Expression where = new Expression(sel.getPool(), Conjunction.AND);
+        //where.add(new Expression(sel.getPool(), "ACTIVE", Operator.EQ, true));
+        where.add(new Expression(sel.getPool(), "SUBSCRIBER_ID", Operator.IN, subscriberMap.keySet().toArray(new String[]{})));
+        
+        if (!itemIds.isEmpty()) {
+            where.add(Expression.createExpression(sel.getPool(), "ID", Operator.IN, itemIds.toArray()));
+        }
+        
+        
+        sel.where(where);
+        StringBuilder extra = new StringBuilder();
+        extra.append(" and not exists (select 1 from provider_tags where provider_id = items.provider_id and tag_group_code = 'network' and tag_code = 'suspended' and tag_value = 'Y' )");
+        extra.append(" and not exists (select 1 from provider_tags where provider_id = items.provider_id and tag_group_code = 'kyc' and tag_code = 'ok' and tag_value = 'N' )");
+        if (environment.get() != null) {
+            extra.append(String.format(" and exists (select 1 from provider_tags where provider_id = items.provider_id and tag_group_code = 'network' and tag_code = 'environment' and tag_value = '%s' )",
+                    environment.get()));
+        }
+        sel.add(extra.toString());
+        
+        return sel.where(where).execute(in.succinct.catalog.indexer.db.model.Item.class, subscriberMap.size() == 1 ? Select.MAX_RECORDS_ALL_RECORDS : 100);
+    }
     @SuppressWarnings("MismatchedQueryAndUpdateOfCollection")
     private void indexed_search(Request request, List<Request> replies) {
 
@@ -364,8 +453,7 @@ public class CatalogSearchEngine {
         subscriberMap.forEach((k, v) -> {
             subscriberReplies.get(k); // load subscriber id
         });
-        //request.getContext().
-
+        
         Message message = request.getMessage();
         Intent intent = message.getIntent();
         if (intent.isIncrementalRequestStartTrigger()){
@@ -373,346 +461,278 @@ public class CatalogSearchEngine {
         } else if (intent.isIncrementalRequestEndTrigger()) {
             intent.setEndTime(request.getContext().getTimestamp());
         }
-
+        
         in.succinct.beckn.Fulfillment intentFulfillment = intent.getFulfillment();
         if (intent.getDescriptor() != null){
             intent.setDescriptor(normalizeDescriptor(intent.getDescriptor()));
         }
-
-        ObjectHolder<Conjunction> providerConjunction = new ObjectHolder<>(null);
-        ObjectHolder<Conjunction> categoryConjunction = new ObjectHolder<>(null);
-        ObjectHolder<Conjunction> itemConjunction = new ObjectHolder<>(null);
         ObjectHolder<Boolean> providerSpecific = new ObjectHolder<>(false);
         ObjectHolder<String> environment = new ObjectHolder<>(null);
-
-        List<IntentQuery> list = new ArrayList<>();
-
-        IntentQuery providerQuery = new IntentQuery(getProviderQuery(request, providerConjunction,providerSpecific,environment),providerConjunction.get());
-        IntentQuery categoryQuery = new IntentQuery(getCategoryQuery(request, categoryConjunction),categoryConjunction.get());
-        IntentQuery itemQuery = new IntentQuery(getItemQuery(request,itemConjunction),itemConjunction.get());
-        IntentQuery locationQuery = new IntentQuery(providerSpecific.get() ? ""  : getLocationQuery(request),Conjunction.AND);
-        Map<Conjunction,List<IntentQuery>> queries = new UnboundedCache<>() {
-            @Override
-            protected List<IntentQuery> getValue(Conjunction key) {
-                return new ArrayList<>();
-            }
-        };
-
-
-        for (IntentQuery q : new IntentQuery[]{providerQuery,locationQuery,categoryQuery,itemQuery}) {
-            if (q.present ) {
-                queries.get(q.conjunction).add(q);
-            }
-        }
-        StringBuilder q = new StringBuilder();
-        for (IntentQuery intentQuery : queries.get(Conjunction.AND)) {
-            if (q.length() > 0){
-                q.append(" AND ");
-            }
-            q.append(intentQuery.query);
-        }
-        StringBuilder orQ = new StringBuilder();
-        for (IntentQuery intentQuery : queries.get(Conjunction.OR)) {
-            if (orQ.length() > 0){
-                orQ.append(" OR ");
-            }
-            orQ.append(intentQuery.query);
-        }
-
-        if (q.length() > 0){
-            if (orQ.length() > 0) {
-                q.append(" AND (");
-                q.append(orQ);
-                q.append(")");
-            }
-        }else {
-            q.append(orQ);
-        }
-        if (q.length() > 0 ){
-            q.insert(0,"(");
-            q.append(")");
-        }
-
-        List<Long> itemIds = new ArrayList<>();
-        if (!ObjectUtil.isVoid(q.toString())) {
-            LuceneIndexer indexer = LuceneIndexer.instance(in.succinct.catalog.indexer.db.model.Item.class);
-            Query query = indexer.constructQuery(q.toString());
-            Config.instance().getLogger(getClass().getName()).info("Searching for /items/search/" + q);
-            itemIds = indexer.findIds(query, 0);
-            Config.instance().getLogger(getClass().getName()).info("SearchAdaptor: Query result size: " + itemIds.size());
-            if (itemIds.isEmpty()) {
-                replies.addAll(subscriberReplies.values()); //Send empty responses.
-                return;
-            }
+        
+        //request.getContext().
+        List<in.succinct.catalog.indexer.db.model.Item> records = getItems(request,providerSpecific,environment);
+        if (records.isEmpty()) {
+            replies.addAll(subscriberReplies.values()); //Send empty responses.
+            return;
         }
 
 
-        Select sel = new Select().from(in.succinct.catalog.indexer.db.model.Item.class);
-        Expression where = new Expression(sel.getPool(), Conjunction.AND);
-        //where.add(new Expression(sel.getPool(), "ACTIVE", Operator.EQ, true));
-        where.add(new Expression(sel.getPool(), "SUBSCRIBER_ID", Operator.IN, subscriberMap.keySet().toArray(new String[]{})));
-
-        if (!itemIds.isEmpty()) {
-            where.add(Expression.createExpression(sel.getPool(), "ID", Operator.IN, itemIds.toArray()));
-        }
-
-
-        sel.where(where);
-        StringBuilder extra = new StringBuilder();
-        extra.append(" and not exists (select 1 from provider_tags where provider_id = items.provider_id and tag_group_code = 'network' and tag_code = 'suspended' and tag_value = 'Y' )");
-        extra.append(" and not exists (select 1 from provider_tags where provider_id = items.provider_id and tag_group_code = 'kyc' and tag_code = 'ok' and tag_value = 'N' )");
-        if (environment.get() != null) {
-            extra.append(String.format(" and exists (select 1 from provider_tags where provider_id = items.provider_id and tag_group_code = 'network' and tag_code = 'environment' and tag_value = '%s' )",
-                    environment.get()));
-        }
-        sel.add(extra.toString());
-
-        List<in.succinct.catalog.indexer.db.model.Item> records = sel.where(where).execute(in.succinct.catalog.indexer.db.model.Item.class, subscriberMap.size() == 1 ? Select.MAX_RECORDS_ALL_RECORDS : 100);
-
-        Set<String> allSubscriberIds = new HashSet<>();
-        Set<String> allProviderIds = new HashSet<>();
-        Set<String> allProviderLocationIds = new HashSet<>();
-        Set<String> allFulfillmentIds = new HashSet<>();
-        Set<String> allCategoryIds = new HashSet<>();
-        Set<String> allPaymentIds = new HashSet<>();
-
-        Cache<String, Cache<String, in.succinct.catalog.indexer.db.model.Item>> appItemMap = createAppDbCache(in.succinct.catalog.indexer.db.model.Item.class, new HashSet<>());
-        records.forEach(i -> {
-            allSubscriberIds.add(i.getSubscriberId());
-            allProviderIds.add(i.getProvider().getObjectId());
-            allProviderLocationIds.addAll(BecknStrings.parse(i.getLocationIds()));
-            allFulfillmentIds.addAll(BecknStrings.parse(i.getFulfillmentIds()));
-            allCategoryIds.addAll(BecknStrings.parse(i.getCategoryIds()));
-            allPaymentIds.addAll(BecknStrings.parse(i.getPaymentIds()));
-            appItemMap.get(i.getSubscriberId()).put(i.getObjectId(), i);
-        });
-        Cache<String, Cache<String, in.succinct.catalog.indexer.db.model.Provider>> appProviderMap = createAppDbCache(in.succinct.catalog.indexer.db.model.Provider.class, allProviderIds);
-        Cache<String, Cache<String, in.succinct.catalog.indexer.db.model.ProviderLocation>> appLocationMap = createAppDbCache(in.succinct.catalog.indexer.db.model.ProviderLocation.class, allProviderLocationIds);
-        Cache<String, Cache<String, in.succinct.catalog.indexer.db.model.Fulfillment>> appFulfillmentMap = createAppDbCache(in.succinct.catalog.indexer.db.model.Fulfillment.class, allFulfillmentIds);
-        Cache<String, Cache<String, in.succinct.catalog.indexer.db.model.Category>> appCategoryMap = createAppDbCache(in.succinct.catalog.indexer.db.model.Category.class, allCategoryIds);
-        Cache<String, Cache<String, in.succinct.catalog.indexer.db.model.Payment>> appPaymentMap = createAppDbCache(in.succinct.catalog.indexer.db.model.Payment.class, allPaymentIds);
-        Cache<String, Cache<Long, in.succinct.catalog.indexer.db.model.Provider>> altProviderMap = new Cache<>(0,0) {
+        Cache<String, Cache<Long,Cache<String, in.succinct.catalog.indexer.db.model.Item>>>  appItemMap = createAppDbCache(in.succinct.catalog.indexer.db.model.Item.class, new HashSet<>());
+        loadCache(records,appItemMap);
+        
+        Cache<String, Cache<Long,in.succinct.catalog.indexer.db.model.Provider>> appProviderMap = new Cache<>(0,0) {
             @Override
             protected Cache<Long, in.succinct.catalog.indexer.db.model.Provider> getValue(String subscriberId) {
-                return new Cache<>() {
+                return new Cache<>(0,0) {
                     @Override
-                    protected in.succinct.catalog.indexer.db.model.Provider getValue(Long aLong) {
-                        return null;
+                    protected in.succinct.catalog.indexer.db.model.Provider getValue(Long id) {
+                        return Database.getTable(in.succinct.catalog.indexer.db.model.Provider.class).get(id);
                     }
                 };
             }
         };
-        appProviderMap.forEach((s,c)-> c.forEach((oid, v) -> altProviderMap.get(s).put(v.getId(), v)));
+        
+
+        
+        Set<String> allSubscriberIds = new HashSet<>();
+        Set<String> allProviderLocationIds = new HashSet<>();
+        Set<String> allFulfillmentIds = new HashSet<>();
+        Set<String> allCategoryIds = new HashSet<>();
+        Set<String> allPaymentIds = new HashSet<>();
+        
+        appItemMap.forEach((s,c)->{
+            allSubscriberIds.add(s);
+
+            Select providerSelect = new Select().from(in.succinct.catalog.indexer.db.model.Provider.class);
+            providerSelect.where(new Expression(providerSelect.getPool(),"ID",Operator.IN, c.keySet().toArray())).execute(in.succinct.catalog.indexer.db.model.Provider.class).
+                    forEach(p->appProviderMap.get(p.getSubscriberId()).put(p.getId(),p));
+            
+            c.forEach((providerId,itemCache) ->{
+                itemCache.forEach((itemObjectId,item)->{
+                    allProviderLocationIds.addAll(BecknStrings.parse(item.getLocationIds()));
+                    allCategoryIds.addAll(BecknStrings.parse(item.getCategoryIds()));
+                    allPaymentIds.addAll(BecknStrings.parse(item.getPaymentIds()));
+                });
+            });
+        });
+        
+        
+        Cache<String, Cache<Long,Cache<String, in.succinct.catalog.indexer.db.model.ProviderLocation>>>  appLocationMap = createAppDbCache(in.succinct.catalog.indexer.db.model.ProviderLocation.class, allProviderLocationIds);
+        Cache<String, Cache<Long,Cache<String, in.succinct.catalog.indexer.db.model.Fulfillment>>>  appFulfillmentMap = createAppDbCache(in.succinct.catalog.indexer.db.model.Fulfillment.class, allFulfillmentIds);
+        Cache<String, Cache<Long,Cache<String, in.succinct.catalog.indexer.db.model.Category>>>  appCategoryMap = createAppDbCache(in.succinct.catalog.indexer.db.model.Category.class, allCategoryIds);
+        Cache<String, Cache<Long,Cache<String, in.succinct.catalog.indexer.db.model.Payment>>>  appPaymentMap = createAppDbCache(in.succinct.catalog.indexer.db.model.Payment.class, allPaymentIds);
+        
 
         for (String subscriberId : allSubscriberIds) {
             Request reply = subscriberReplies.get(subscriberId);
             Context context = reply.getContext();
             Catalog catalog = reply.getMessage().getCatalog();
             Providers providers = catalog.getProviders();
+            Cache<Long, in.succinct.catalog.indexer.db.model.Provider> providerCache = appProviderMap.get(subscriberId);
+            providerCache.forEach((pid,dbProvider)->{
+                Provider outProvider = new Provider(dbProvider.getObjectJson());
+                boolean providerIsSuspended = dbProvider.getReflector().getJdbcTypeHelper().getTypeRef(boolean.class).getTypeConverter().valueOf(outProvider.getTag("network","suspended"));
+                String env = outProvider.getTag("network","environment");
+                if (environment.get() != null && env != null && !ObjectUtil.equals(env,environment.get())){
+                    return;
+                }
+                if (providerIsSuspended){
+                    return;
+                }
+                String sKycOk = outProvider.getTag("kyc","ok");
+                
+                boolean kycOk = sKycOk == null || dbProvider.getReflector().getJdbcTypeHelper().getTypeRef(boolean.class).getTypeConverter().valueOf(sKycOk);
+                if (!kycOk){
+                    return;
+                }
+                
+                Time time = new Time();
+                time.setLabel("enable");
+                time.setTimestamp(reply.getContext().getTimestamp());
+                outProvider.setTime(time);
+                providers.add(outProvider);
 
-            Map<String, in.succinct.catalog.indexer.db.model.Item> itemMap = appItemMap.get(subscriberId);
-            for (String becknItemId : itemMap.keySet()) {
-                Config.instance().getLogger(getClass().getName()).info("SearchAdaptor: Looping through result items" + becknItemId);
-                in.succinct.catalog.indexer.db.model.Item dbItem = itemMap.get(becknItemId);
+                Cache<String, in.succinct.catalog.indexer.db.model.Item> itemMap = appItemMap.get(subscriberId).get(pid);
+                for (String becknItemId : itemMap.keySet()) {
+                    Config.instance().getLogger(getClass().getName()).info("SearchAdaptor: Looping through result items" + becknItemId);
+                    in.succinct.catalog.indexer.db.model.Item dbItem = itemMap.get(becknItemId);
+                    
+                    BecknStrings categoryIds = new BecknStrings(dbItem.getCategoryIds());
+                    BecknStrings fulfillmentIds = new BecknStrings(dbItem.getFulfillmentIds());
+                    BecknStrings paymentIds = new BecknStrings(dbItem.getPaymentIds());
+                    BecknStrings locationIds = new BecknStrings(dbItem.getLocationIds());
 
-                in.succinct.catalog.indexer.db.model.Provider dbProvider = altProviderMap.get(subscriberId).get(dbItem.getProviderId());
-                BecknStrings categoryIds = new BecknStrings(dbItem.getCategoryIds());
-                BecknStrings fulfillmentIds = new BecknStrings(dbItem.getFulfillmentIds());
-                BecknStrings paymentIds = new BecknStrings(dbItem.getPaymentIds());
-                BecknStrings locationIds = new BecknStrings(dbItem.getLocationIds());
-
-                Provider outProvider = providers.get(dbProvider.getObjectId());
-                if (outProvider == null) {
-                    outProvider = new Provider(dbProvider.getObjectJson());
-                    boolean providerIsSuspended = dbProvider.getReflector().getJdbcTypeHelper().getTypeRef(boolean.class).getTypeConverter().valueOf(outProvider.getTag("network","suspended"));
-                    String env = outProvider.getTag("network","environment");
-                    if (environment.get() != null && env != null && !ObjectUtil.equals(env,environment.get())){
-                        continue;
+                    Categories categories = outProvider.getCategories();
+                    if (categories == null) {
+                        categories = new Categories();
+                        outProvider.setCategories(categories);
                     }
-                    if (providerIsSuspended){
-                        continue;
-                    }
-                    String sKycOk = outProvider.getTag("kyc","ok");
-
-                    boolean kycOk = sKycOk == null || dbProvider.getReflector().getJdbcTypeHelper().getTypeRef(boolean.class).getTypeConverter().valueOf(sKycOk);
-                    if (!kycOk){
-                        continue;
-                    }
-
-
-
-                    Time time = new Time();
-                    time.setLabel("enable");
-                    time.setTimestamp(reply.getContext().getTimestamp());
-                    outProvider.setTime(time);
-                    providers.add(outProvider);
-                }
-                Categories categories = outProvider.getCategories();
-                if (categories == null) {
-                    categories = new Categories();
-                    outProvider.setCategories(categories);
-                }
-                for (String categoryId : categoryIds) {
-                    if (categories.get(categoryId) == null) {
-                        in.succinct.catalog.indexer.db.model.Category category = appCategoryMap.get(subscriberId).get(categoryId);
-                        if (category != null) {
-                            categories.add(new Category(category.getObjectJson()));
-                        }
-                    }
-                }
-                Locations locations = outProvider.getLocations();
-                if (locations == null) {
-                    locations = new Locations();
-                    outProvider.setLocations(locations);
-                }
-                for (String locationId : locationIds) {
-                    if (locations.get(locationId) == null){
-                        ProviderLocation providerLocation = appLocationMap.get(subscriberId).get(locationId);
-                        if (providerLocation != null) {
-                            locations.add(new Location(providerLocation.getObjectJson()));
-                        }
-                    }
-                }
-                Fulfillments fulfillments = outProvider.getFulfillments();
-                if (fulfillments == null) {
-                    fulfillments = new Fulfillments();
-                    outProvider.setFulfillments(fulfillments);
-                }
-
-                for (String fulfillmentId : fulfillmentIds) {
-                    if (fulfillments.get(fulfillmentId) == null){
-                        Fulfillment fulfillment = appFulfillmentMap.get(subscriberId).get(fulfillmentId);
-                        if (fulfillment != null){
-                            in.succinct.beckn.Fulfillment outFulfillment = new in.succinct.beckn.Fulfillment(fulfillment.getObjectJson());
-                            fulfillments.add(outFulfillment);
-                            in.succinct.beckn.Fulfillment catFulfillment = catalog.getFulfillments().get(fulfillmentId);
-                            if (catFulfillment == null){
-                                catFulfillment = new in.succinct.beckn.Fulfillment();
-                                catFulfillment.setId(fulfillmentId);
-                                catFulfillment.setType(outFulfillment.getType());
-                                catalog.getFulfillments().add(catFulfillment);
+                    for (String categoryId : categoryIds) {
+                        if (categories.get(categoryId) == null) {
+                            in.succinct.catalog.indexer.db.model.Category category = appCategoryMap.get(subscriberId).get(pid).get(categoryId);
+                            if (category != null) {
+                                categories.add(new Category(category.getObjectJson()));
                             }
                         }
                     }
-                }
-                Payments payments = outProvider.getPayments();
-                if (payments == null) {
-                    payments = new Payments();
-                    outProvider.setPayments(payments);
-                }
-                for (String paymentId : paymentIds) {
-                    if (payments.get(paymentId) == null){
-                        Payment payment = appPaymentMap.get(subscriberId).get(paymentId);
-                        if (payment != null){
-                            payments.add(new in.succinct.beckn.Payment(payment.getObjectJson()));
+                    Locations locations = outProvider.getLocations();
+                    if (locations == null) {
+                        locations = new Locations();
+                        outProvider.setLocations(locations);
+                    }
+                    for (String locationId : locationIds) {
+                        if (locations.get(locationId) == null){
+                            ProviderLocation providerLocation = appLocationMap.get(subscriberId).get(pid).get(locationId);
+                            if (providerLocation != null) {
+                                locations.add(new Location(providerLocation.getObjectJson()));
+                            }
                         }
                     }
-                }
-
-                Items items = outProvider.getItems();
-                if (items == null) {
-                    items = new Items();
-                    outProvider.setItems(items);
-                }
-                if (items.get(dbItem.getObjectId()) == null) {
-                    Item outItem = new Item((JSONObject) JSONAwareWrapper.parse(dbItem.getObjectJson()));
-                    outItem.setTime(new Time());
-                    outItem.getTime().setLabel(dbItem.isActive() ? "enable" : "disable");
-                    outItem.getTime().setTimestamp(dbItem.getUpdatedAt());
-                    //String outFulfillmentType = fulfillments.get(outItem.getFulfillmentId()).getType();
-                    String inFulfillmentType = intentFulfillment == null ? null : intentFulfillment.getType();
-                    boolean requestedFulfillmentTypeSupported = isFulfillmentTypeSuppored ( inFulfillmentType, fulfillments);
-
-
-                    FulfillmentStop end = intentFulfillment == null ? (intent.getLocation() == null ? null : new FulfillmentStop() {{
-                        setLocation(intent.getLocation());
-                    }}) : intentFulfillment.getEnd();
-
-                    if (requestedFulfillmentTypeSupported) {
-
-                        outItem.setMatched(true);
-                        outItem.setRelated(true);
-                        outItem.setRecommended(true);
-
-                        ItemQuantity itemQuantity = new ItemQuantity();
-                        Quantity available = new Quantity();
-                        available.setCount(Integer.MAX_VALUE); // Ordering more than 20 is not allowed.
-                        itemQuantity.setAvailable(available);
-                        itemQuantity.setMaximum(available);
-                        outItem.setItemQuantity(itemQuantity);
-
-                        for (String locationId : outItem.getLocationIds()){
-
-                            Location storeLocation = locations.get(locationId);
-                            City city = City.findByCountryAndStateAndName(storeLocation.getAddress().getCountry(), storeLocation.getAddress().getState(), storeLocation.getAddress().getCity());
-
-                            boolean storeInCity = ObjectUtil.equals(city.getCode(), request.getContext().getCity()) || ObjectUtil.equals(request.getContext().getCity(), "*") || ObjectUtil.isVoid(request.getContext().getCity());
-                            boolean includeItem = false;
-
-
-                            if (end != null && end.getLocation() != null && end.getLocation().getGps() != null) {
-                                for (String fId: outItem.getFulfillmentIds()) {
-                                    in.succinct.beckn.Fulfillment fulfillment = fulfillments.get(fId);
-                                    if (RetailFulfillmentType.valueOf(fulfillment.getType()) == RetailFulfillmentType.store_pickup) {
-                                        includeItem = true;
-                                    } else if (RetailFulfillmentType.valueOf(fulfillment.getType()) == RetailFulfillmentType.home_delivery){
-                                        Circle circle = storeLocation.getCircle();
-                                        if (providerSpecific.get() || circle == null) {
+                    Fulfillments fulfillments = outProvider.getFulfillments();
+                    if (fulfillments == null) {
+                        fulfillments = new Fulfillments();
+                        outProvider.setFulfillments(fulfillments);
+                    }
+                    
+                    for (String fulfillmentId : fulfillmentIds) {
+                        if (fulfillments.get(fulfillmentId) == null){
+                            Fulfillment fulfillment = appFulfillmentMap.get(subscriberId).get(pid).get(fulfillmentId);
+                            if (fulfillment != null){
+                                in.succinct.beckn.Fulfillment outFulfillment = new in.succinct.beckn.Fulfillment(fulfillment.getObjectJson());
+                                fulfillments.add(outFulfillment);
+                                in.succinct.beckn.Fulfillment catFulfillment = catalog.getFulfillments().get(fulfillmentId);
+                                if (catFulfillment == null){
+                                    catFulfillment = new in.succinct.beckn.Fulfillment();
+                                    catFulfillment.setId(fulfillmentId);
+                                    catFulfillment.setType(outFulfillment.getType());
+                                    catalog.getFulfillments().add(catFulfillment);
+                                }
+                            }
+                        }
+                    }
+                    Payments payments = outProvider.getPayments();
+                    if (payments == null) {
+                        payments = new Payments();
+                        outProvider.setPayments(payments);
+                    }
+                    for (String paymentId : paymentIds) {
+                        if (payments.get(paymentId) == null){
+                            Payment payment = appPaymentMap.get(subscriberId).get(pid).get(paymentId);
+                            if (payment != null){
+                                payments.add(new in.succinct.beckn.Payment(payment.getObjectJson()));
+                            }
+                        }
+                    }
+                    
+                    Items items = outProvider.getItems();
+                    if (items == null) {
+                        items = new Items();
+                        outProvider.setItems(items);
+                    }
+                    if (items.get(dbItem.getObjectId()) == null) {
+                        Item outItem = new Item((JSONObject) JSONAwareWrapper.parse(dbItem.getObjectJson()));
+                        outItem.setTime(new Time());
+                        outItem.getTime().setLabel(dbItem.isActive() ? "enable" : "disable");
+                        outItem.getTime().setTimestamp(dbItem.getUpdatedAt());
+                        //String outFulfillmentType = fulfillments.get(outItem.getFulfillmentId()).getType();
+                        String inFulfillmentType = intentFulfillment == null ? null : intentFulfillment.getType();
+                        boolean requestedFulfillmentTypeSupported = isFulfillmentTypeSupported( inFulfillmentType, fulfillments);
+                        
+                        
+                        FulfillmentStop end = intentFulfillment == null ? (intent.getLocation() == null ? null : new FulfillmentStop() {{
+                            setLocation(intent.getLocation());
+                        }}) : intentFulfillment.getEnd();
+                        
+                        if (requestedFulfillmentTypeSupported) {
+                            
+                            outItem.setMatched(true);
+                            outItem.setRelated(true);
+                            outItem.setRecommended(true);
+                            
+                            ItemQuantity itemQuantity = new ItemQuantity();
+                            Quantity available = new Quantity();
+                            available.setCount(Integer.MAX_VALUE); // Ordering more than 20 is not allowed.
+                            itemQuantity.setAvailable(available);
+                            itemQuantity.setMaximum(available);
+                            outItem.setItemQuantity(itemQuantity);
+                            
+                            for (String locationId : outItem.getLocationIds()){
+                                
+                                Location storeLocation = locations.get(locationId);
+                                City city = City.findByCountryAndStateAndName(storeLocation.getAddress().getCountry(), storeLocation.getAddress().getState(), storeLocation.getAddress().getCity());
+                                
+                                boolean storeInCity = ObjectUtil.equals(city.getCode(), request.getContext().getCity()) || ObjectUtil.equals(request.getContext().getCity(), "*") || ObjectUtil.isVoid(request.getContext().getCity());
+                                boolean includeItem = false;
+                                
+                                
+                                if (end != null && end.getLocation() != null && end.getLocation().getGps() != null) {
+                                    for (String fId: outItem.getFulfillmentIds()) {
+                                        in.succinct.beckn.Fulfillment fulfillment = fulfillments.get(fId);
+                                        if (RetailFulfillmentType.valueOf(fulfillment.getType()) == RetailFulfillmentType.store_pickup) {
                                             includeItem = true;
-                                        } else {
-                                            if (circle.getGps() == null) {
-                                                circle.setGps(storeLocation.getGps());
-                                            }
-                                            Scalar radius = circle.getRadius();
-
-                                            if (radius == null) {
-                                                radius = new Scalar() {{
-                                                    setValue(0);
-                                                }};
-                                                circle.setRadius(radius);
-                                            }
-                                            if (ObjectUtil.isVoid(radius.getUnit())) {
-                                                radius.setUnit("km");
-                                            }
-                                            double radiusValue = radius.getValue();
-                                            if (!radius.getUnit().equalsIgnoreCase("km")) {
-                                                radiusValue = convertDistanceToKm(radiusValue, radius.getUnit());
-                                            }
-                                            double distance = circle.getGps().distanceTo(end.getLocation().getGps());
-                                            if (distance == 0) {
-                                                includeItem = true; //This is to show inactive items for sellers who query by store location.
-                                            } else if (distance <= radiusValue) {
-                                                includeItem = dbItem.isActive();
+                                        } else if (RetailFulfillmentType.valueOf(fulfillment.getType()) == RetailFulfillmentType.home_delivery){
+                                            Circle circle = storeLocation.getCircle();
+                                            if (providerSpecific.get() || circle == null) {
+                                                includeItem = true;
+                                            } else {
+                                                if (circle.getGps() == null) {
+                                                    circle.setGps(storeLocation.getGps());
+                                                }
+                                                Scalar radius = circle.getRadius();
+                                                
+                                                if (radius == null) {
+                                                    radius = new Scalar() {{
+                                                        setValue(0);
+                                                    }};
+                                                    circle.setRadius(radius);
+                                                }
+                                                if (ObjectUtil.isVoid(radius.getUnit())) {
+                                                    radius.setUnit("km");
+                                                }
+                                                double radiusValue = radius.getValue();
+                                                if (!radius.getUnit().equalsIgnoreCase("km")) {
+                                                    radiusValue = convertDistanceToKm(radiusValue, radius.getUnit());
+                                                }
+                                                double distance = circle.getGps().distanceTo(end.getLocation().getGps());
+                                                if (distance == 0) {
+                                                    includeItem = true; //This is to show inactive items for sellers who query by store location.
+                                                } else if (distance <= radiusValue) {
+                                                    includeItem = dbItem.isActive();
+                                                }
                                             }
                                         }
+                                        if (includeItem){
+                                            break;
+                                        }
                                     }
-                                    if (includeItem){
-                                        break;
+                                    
+                                } else if (end == null && storeInCity) {
+                                    includeItem = true;
+                                }
+                                if (includeItem ) {
+                                    if (items.get(outItem.getId()) == null) {
+                                        items.add(outItem);
+                                        reply.setSuppressed(false);
                                     }
+                                }else {
+                                    outItem.getLocationIds().remove(locationId);
                                 }
-
-                            } else if (end == null && storeInCity) {
-                                includeItem = true;
                             }
-                            if (includeItem ) {
-                                if (items.get(outItem.getId()) == null) {
-                                    items.add(outItem);
-                                    reply.setSuppressed(false);
-                                }
-                            }else {
-                                outItem.getLocationIds().remove(locationId);
-                            }
+                            
+                            
                         }
-
-
                     }
                 }
-            }
+                
+                
+            });
+
+            
         }
         replies.addAll(subscriberReplies.values());
     }
 
-    private boolean isFulfillmentTypeSuppored(String inFulfillmentType, Fulfillments fulfillments) {
+    private boolean isFulfillmentTypeSupported(String inFulfillmentType, Fulfillments fulfillments) {
         boolean supported = true;
 
         if (inFulfillmentType != null) {
@@ -741,7 +761,7 @@ public class CatalogSearchEngine {
         return descriptor;
     }
 
-    private <T extends Model & IndexedSubscriberModel> Cache<String, T> createDbCache(Class<T> clazz, String subscriberId ,Set<String> ids) {
+    private <T extends Model & IndexedProviderModel> Cache<String, T> createDbCache(Class<T> clazz, String subscriberId , Long providerId,Set<String> ids) {
         Cache<String, T> cache = new Cache<>(0, 0) {
 
             @Override
@@ -752,6 +772,7 @@ public class CatalogSearchEngine {
                     T m  = Database.getTable(clazz).newRecord();
                     m.setObjectId(id);
                     m.setSubscriberId(subscriberId);
+                    m.setProviderId(providerId);
                     m = Database.getTable(clazz).getRefreshed(m);
                     return m;
                 }
@@ -762,6 +783,7 @@ public class CatalogSearchEngine {
 
             Expression where  = new Expression(select.getPool(),Conjunction.AND).
                     add(new Expression(select.getPool(), "OBJECT_ID", Operator.IN, ids.toArray())).
+                    add(new Expression(select.getPool(), "PROVIDER_ID", Operator.EQ, providerId)).
                     add(new Expression(select.getPool(), "SUBSCRIBER_ID", Operator.EQ, subscriberId));
 
             select.execute(clazz).forEach(t -> cache.put(t.getObjectId(), t));
@@ -769,19 +791,30 @@ public class CatalogSearchEngine {
         return cache;
     }
 
-    private <T extends Model & IndexedSubscriberModel> Cache<String, Cache<String, T>> createAppDbCache(Class<T> clazz, Set<String> ids) {
-        Cache<String, Cache<String, T>> cache = new Cache<>(0, 0) {
+    private <T extends Model & IndexedProviderModel> Cache<String, Cache<Long,Cache<String, T>>> createAppDbCache(Class<T> clazz, Set<String> ids) {
+        Cache<String, Cache<Long,Cache<String, T>>> cache = new Cache<>(0, 0) {
             @Override
-            protected Cache<String, T> getValue(String subscriberId) {
-                return createDbCache(clazz, subscriberId, new HashSet<>());
+            protected Cache<Long,Cache<String, T>> getValue(String subscriberId) {
+                return new Cache<Long, Cache<String, T>>() {
+                    @Override
+                    protected Cache<String, T> getValue(Long providerId) {
+                        return createDbCache(clazz, subscriberId,providerId, new HashSet<>());
+                    }
+                };
             }
         };
         if (!ids.isEmpty() && !ids.contains(null)) {
             Select select = new Select().from(clazz);
-            select.where(new Expression(select.getPool(), "OBJECT_ID", Operator.IN, ids.toArray()));
-            select.execute(clazz).forEach(t -> cache.get(t.getSubscriberId()).put(t.getObjectId(), t));
+            select.where(new Expression(select.getPool(),"OBJECT_ID",Operator.IN,ids.toArray()));
+            loadCache(select.execute(clazz),cache);
         }
         return cache;
     }
+    private <T extends Model & IndexedProviderModel> void loadCache(List<T> objects, Cache<String, Cache<Long,Cache<String, T>>> cache){
+        objects.forEach(t->{
+            cache.get(t.getSubscriberId()).get(t.getProviderId()).put(t.getObjectId(), t);
+        });
+    }
+    
 
 }
