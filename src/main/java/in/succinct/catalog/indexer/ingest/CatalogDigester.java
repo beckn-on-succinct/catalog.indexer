@@ -256,7 +256,7 @@ public class CatalogDigester implements Task {
         payment.setSubscriberId(provider.getSubscriberId());
         payment.setProviderId(provider.getId());
         payment.setObjectId(bPayment.getId());
-        payment.setObjectName(bPayment.getType().toString());
+        payment.setObjectName(bPayment.getInvoiceEvent().toString());
         payment.setObjectJson(bPayment.toString());
         payment = Database.getTable(in.succinct.catalog.indexer.db.model.Payment.class).getRefreshed(payment);
         payment.save();
