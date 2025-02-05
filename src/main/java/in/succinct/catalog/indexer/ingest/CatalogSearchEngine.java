@@ -41,6 +41,8 @@ import in.succinct.beckn.Quantity;
 import in.succinct.beckn.Request;
 import in.succinct.beckn.Scalar;
 import in.succinct.beckn.Subscriber;
+import in.succinct.beckn.TagGroup;
+import in.succinct.beckn.TagGroups;
 import in.succinct.beckn.Time;
 import in.succinct.catalog.indexer.db.model.Fulfillment;
 import in.succinct.catalog.indexer.db.model.IndexedProviderModel;
@@ -151,7 +153,7 @@ public class CatalogSearchEngine {
         return name.trim();
     }
 
-    public String getProviderQuery(Request request, ObjectHolder<Conjunction> conjunction, ObjectHolder<Boolean> providerSpecific , ObjectHolder<String> environment) {
+    public String getProviderQuery(Request request, ObjectHolder<Conjunction> conjunction, ObjectHolder<Boolean> providerSpecific , ObjectHolder<String> environment,ObjectHolder<TagGroups> providerTags) {
         Intent intent = request.getMessage().getIntent();
         Descriptor intentDescriptor = intent == null ? null : intent.getDescriptor();
         conjunction.set(Conjunction.OR);
@@ -162,6 +164,8 @@ public class CatalogSearchEngine {
         String env = provider == null? null : provider.getTag("network","environment");
         environment.set(env);
         StringBuilder providerQ = new StringBuilder();
+        TagGroups tags = provider == null ? null : provider.getTags();
+        providerTags.set(tags);
 
         if (provider != null && !ObjectUtil.isVoid(provider.getId())) {
             provider.setId(provider.getId().trim());
@@ -333,7 +337,7 @@ public class CatalogSearchEngine {
         boolean present;
         Conjunction conjunction;
     }
-    public List<in.succinct.catalog.indexer.db.model.Item> getItems(Request request, ObjectHolder<Boolean> providerSpecific, ObjectHolder<String> environment){
+    public List<in.succinct.catalog.indexer.db.model.Item> getItems(Request request, ObjectHolder<Boolean> providerSpecific, ObjectHolder<String> environment, ObjectHolder<TagGroups> providerTags){
 
         ObjectHolder<Conjunction> providerConjunction = new ObjectHolder<>(null);
         ObjectHolder<Conjunction> categoryConjunction = new ObjectHolder<>(null);
@@ -341,7 +345,7 @@ public class CatalogSearchEngine {
         
         List<IntentQuery> list = new ArrayList<>();
         
-        IntentQuery providerQuery = new IntentQuery(getProviderQuery(request, providerConjunction,providerSpecific,environment),providerConjunction.get());
+        IntentQuery providerQuery = new IntentQuery(getProviderQuery(request, providerConjunction,providerSpecific,environment,providerTags),providerConjunction.get());
         IntentQuery categoryQuery = new IntentQuery(getCategoryQuery(request, categoryConjunction),categoryConjunction.get());
         IntentQuery itemQuery = new IntentQuery(getItemQuery(request,itemConjunction),itemConjunction.get());
         IntentQuery locationQuery = new IntentQuery(providerSpecific.get() ? ""  : getLocationQuery(request),Conjunction.AND);
@@ -468,9 +472,11 @@ public class CatalogSearchEngine {
         }
         ObjectHolder<Boolean> providerSpecific = new ObjectHolder<>(false);
         ObjectHolder<String> environment = new ObjectHolder<>(null);
+        ObjectHolder<TagGroups> providerTags = new ObjectHolder<>(null);
+        
         
         //request.getContext().
-        List<in.succinct.catalog.indexer.db.model.Item> records = getItems(request,providerSpecific,environment);
+        List<in.succinct.catalog.indexer.db.model.Item> records = getItems(request,providerSpecific,environment,providerTags);
         if (records.isEmpty()) {
             replies.addAll(subscriberReplies.values()); //Send empty responses.
             return;
@@ -543,6 +549,10 @@ public class CatalogSearchEngine {
                 
                 boolean kycOk = sKycOk == null || dbProvider.getReflector().getJdbcTypeHelper().getTypeRef(boolean.class).getTypeConverter().valueOf(sKycOk);
                 if (!kycOk){
+                    return;
+                }
+                
+                if (!matches(outProvider.getTags(),providerTags.get())){
                     return;
                 }
                 
@@ -731,7 +741,32 @@ public class CatalogSearchEngine {
         }
         replies.addAll(subscriberReplies.values());
     }
-
+    private boolean matches(TagGroups out,TagGroups in){
+        if (in == null){
+            return true;
+        }else if (out == null){
+            return false;
+        }else {
+            for (TagGroup inGroup : in) {
+                TagGroup outGroup = out.get(inGroup.getId());
+                if (outGroup == null){
+                    return false;
+                }else {
+                    for (TagGroup inTag : inGroup.getList()) {
+                        TagGroup outTag = outGroup.getList().get(inTag.getId());
+                        if (outTag == null){
+                            return false;
+                        }
+                        if (!ObjectUtil.equals(inTag.getValue(),outTag.getValue())){
+                            return false;
+                        }
+                    }
+                }
+                
+            }
+        }
+        return true;
+    }
     private boolean isFulfillmentTypeSupported(String inFulfillmentType, Fulfillments fulfillments) {
         boolean supported = true;
 
