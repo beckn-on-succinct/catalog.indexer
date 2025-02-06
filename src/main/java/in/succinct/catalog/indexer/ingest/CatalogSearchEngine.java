@@ -757,12 +757,15 @@ public class CatalogSearchEngine {
                         if (outTag == null){
                             return false;
                         }
-                        if (!ObjectUtil.equals(inTag.getValue(),outTag.getValue())){
-                            return false;
+                        String inValue = inTag.getValue();
+                        String outValue = outTag.getValue();
+                        if (inValue != null){
+                            if (!ObjectUtil.equals(inValue,outValue)){
+                                return false;
+                            }
                         }
                     }
                 }
-                
             }
         }
         return true;
