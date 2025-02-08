@@ -53,6 +53,7 @@ import in.succinct.json.JSONAwareWrapper;
 import org.apache.lucene.search.Query;
 import org.json.simple.JSONObject;
 
+import javax.annotation.RegEx;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -61,6 +62,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.StringTokenizer;
 import java.util.logging.Level;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @SuppressWarnings("unused")
 public class CatalogSearchEngine {
@@ -760,7 +763,7 @@ public class CatalogSearchEngine {
                         String inValue = inTag.getValue();
                         String outValue = outTag.getValue();
                         if (inValue != null){
-                            if (!ObjectUtil.equals(inValue,outValue)){
+                            if (!ObjectUtil.equals(inValue,outValue) && !Pattern.matches(inValue,StringUtil.valueOf(outValue))){
                                 return false;
                             }
                         }
