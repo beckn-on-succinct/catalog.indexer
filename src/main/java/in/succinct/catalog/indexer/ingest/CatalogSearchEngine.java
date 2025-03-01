@@ -53,7 +53,6 @@ import in.succinct.json.JSONAwareWrapper;
 import org.apache.lucene.search.Query;
 import org.json.simple.JSONObject;
 
-import javax.annotation.RegEx;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -62,7 +61,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.StringTokenizer;
 import java.util.logging.Level;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @SuppressWarnings("unused")
@@ -654,7 +652,7 @@ public class CatalogSearchEngine {
                         
                         FulfillmentStop end = intentFulfillment == null ? (intent.getLocation() == null ? null : new FulfillmentStop() {{
                             setLocation(intent.getLocation());
-                        }}) : intentFulfillment.getEnd();
+                        }}) : intentFulfillment._getEnd();
                         
                         if (requestedFulfillmentTypeSupported) {
                             
