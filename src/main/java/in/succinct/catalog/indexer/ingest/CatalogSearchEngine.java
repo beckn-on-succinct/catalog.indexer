@@ -556,6 +556,7 @@ public class CatalogSearchEngine {
                 if (!matches(outProvider.getTags(),providerTags.get())){
                     return;
                 }
+                //outProvider.getTags() is updated to match input.
                 
                 Time time = new Time();
                 time.setLabel("enable");
@@ -742,17 +743,19 @@ public class CatalogSearchEngine {
         }
         replies.addAll(subscriberReplies.values());
     }
-    private boolean matches(TagGroups out,TagGroups in){
-        if (in == null){
+    private boolean matches(TagGroups outGroups,TagGroups inTagGroups){
+        TagGroups finalGroups = new TagGroups();
+        
+        if (inTagGroups == null || inTagGroups.isEmpty()){
             return true;
-        }else if (out == null){
+        }else if (outGroups == null){
             return false;
         }else {
-            for (TagGroup inGroup : in) {
-                TagGroup outGroup = out.get(inGroup.getId());
+            for (TagGroup inGroup : inTagGroups) {
+                TagGroup outGroup = outGroups.get(inGroup.getId());
                 if (outGroup == null){
                     return false;
-                }else {
+                }else if (!inGroup.getList().isEmpty()){
                     for (TagGroup inTag : inGroup.getList()) {
                         TagGroup outTag = outGroup.getList().get(inTag.getId());
                         if (outTag == null){
@@ -765,10 +768,14 @@ public class CatalogSearchEngine {
                                 return false;
                             }
                         }
+                        finalGroups.setTag(outGroup.getId(),outGroup.getId(),outValue);
                     }
+                }else {
+                    finalGroups.add(outGroup);
                 }
             }
         }
+        outGroups.setPayload(finalGroups.toString());
         return true;
     }
     private boolean isFulfillmentTypeSupported(String inFulfillmentType, Fulfillments fulfillments) {
