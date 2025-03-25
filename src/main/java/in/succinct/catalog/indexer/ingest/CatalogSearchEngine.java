@@ -553,7 +553,7 @@ public class CatalogSearchEngine {
                     return;
                 }
                 
-                if (!matches(outProvider.getTags(),providerTags.get())){
+                if (!matches(outProvider,providerTags.get())){
                     return;
                 }
                 //outProvider.getTags() is updated to match input.
@@ -743,7 +743,8 @@ public class CatalogSearchEngine {
         }
         replies.addAll(subscriberReplies.values());
     }
-    private boolean matches(TagGroups outTagGroups,TagGroups inTagGroups){
+    private boolean matches(Provider outProvider, TagGroups inTagGroups){
+        TagGroups outTagGroups = outProvider.getTags();
         TagGroups finalGroups = new TagGroups();
         
         if (inTagGroups == null || inTagGroups.isEmpty()){
@@ -782,6 +783,7 @@ public class CatalogSearchEngine {
             }
         }
         outTagGroups.setInner(finalGroups.getInner());
+        outProvider.setTags(outTagGroups);
         return true;
     }
     private boolean isFulfillmentTypeSupported(String inFulfillmentType, Fulfillments fulfillments) {
