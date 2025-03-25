@@ -768,16 +768,16 @@ public class CatalogSearchEngine {
                                 return false;
                             }
                         }
-                        finalGroups.setTag(outGroup.getId(),outGroup.getId(),outValue);
+                        finalGroups.setTag(outGroup.getId(),outTag.getId(),outValue);
                     }
                 }else {
-                    finalGroups.add(outGroup);
+                    finalGroups.add(new TagGroup(outGroup.toString());
                 }
             }
             for (TagGroup outGroup : outTagGroups){
                 TagGroup finalTagGroup = finalGroups.get(outGroup.getId());
                 if (finalTagGroup == null){
-                    finalGroups.add(outGroup);
+                    finalGroups.add(new TagGroup(outGroup.toString()));
                 }
             }
         }
