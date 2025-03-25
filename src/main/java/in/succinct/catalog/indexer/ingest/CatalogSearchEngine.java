@@ -36,6 +36,7 @@ import in.succinct.beckn.Locations;
 import in.succinct.beckn.Message;
 import in.succinct.beckn.Payments;
 import in.succinct.beckn.Provider;
+import in.succinct.beckn.Provider.Directories;
 import in.succinct.beckn.Providers;
 import in.succinct.beckn.Quantity;
 import in.succinct.beckn.Request;
@@ -748,6 +749,12 @@ public class CatalogSearchEngine {
         TagGroups finalGroups = new TagGroups();
         
         if (inTagGroups == null || inTagGroups.isEmpty()){
+            TagGroups tagGroups  = outProvider.getTags();
+            for (TagGroup tagGroup : tagGroups){
+                if (!tagGroup.isDisplay()){
+                    tagGroups.remove(tagGroup);
+                }
+            }
             return true;
         }else if (outTagGroups == null){
             return false;
