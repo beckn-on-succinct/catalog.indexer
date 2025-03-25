@@ -771,7 +771,7 @@ public class CatalogSearchEngine {
                         finalGroups.setTag(outGroup.getId(),outTag.getId(),outValue);
                     }
                 }else {
-                    finalGroups.add(new TagGroup(outGroup.toString());
+                    finalGroups.add(new TagGroup(outGroup.toString()));
                 }
             }
             for (TagGroup outGroup : outTagGroups){
