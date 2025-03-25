@@ -743,16 +743,16 @@ public class CatalogSearchEngine {
         }
         replies.addAll(subscriberReplies.values());
     }
-    private boolean matches(TagGroups outGroups,TagGroups inTagGroups){
+    private boolean matches(TagGroups outTagGroups,TagGroups inTagGroups){
         TagGroups finalGroups = new TagGroups();
         
         if (inTagGroups == null || inTagGroups.isEmpty()){
             return true;
-        }else if (outGroups == null){
+        }else if (outTagGroups == null){
             return false;
         }else {
             for (TagGroup inGroup : inTagGroups) {
-                TagGroup outGroup = outGroups.get(inGroup.getId());
+                TagGroup outGroup = outTagGroups.get(inGroup.getId());
                 if (outGroup == null){
                     return false;
                 }else if (!inGroup.getList().isEmpty()){
@@ -774,8 +774,14 @@ public class CatalogSearchEngine {
                     finalGroups.add(outGroup);
                 }
             }
+            for (TagGroup outGroup : outTagGroups){
+                TagGroup finalTagGroup = finalGroups.get(outGroup.getId());
+                if (finalTagGroup == null){
+                    finalGroups.add(outGroup);
+                }
+            }
         }
-        outGroups.setPayload(finalGroups.toString());
+        outTagGroups.setInner(finalGroups.getInner());
         return true;
     }
     private boolean isFulfillmentTypeSupported(String inFulfillmentType, Fulfillments fulfillments) {
