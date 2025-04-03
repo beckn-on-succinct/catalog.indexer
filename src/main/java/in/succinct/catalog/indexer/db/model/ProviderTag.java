@@ -1,5 +1,6 @@
 package in.succinct.catalog.indexer.db.model;
 
+import com.venky.swf.db.annotations.column.IS_NULLABLE;
 import com.venky.swf.db.annotations.column.UNIQUE_KEY;
 import com.venky.swf.db.annotations.column.indexing.Index;
 import com.venky.swf.db.model.Model;
@@ -7,6 +8,7 @@ import com.venky.swf.db.model.Model;
 public interface ProviderTag extends Model {
     @UNIQUE_KEY
     @Index
+    @IS_NULLABLE(false) //Ensure delete cascade happens
     Long getProviderId();
     void setProviderId(Long id);
     Provider getProvider();

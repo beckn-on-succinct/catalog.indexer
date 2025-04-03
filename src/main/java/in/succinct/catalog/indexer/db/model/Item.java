@@ -22,30 +22,5 @@ public interface Item extends Model,IndexedActivatableModel, HasDescriptor {
     String getLocationIds();
     void setLocationIds(String locationIds);
 
-    /*
-    @Index
-    @UNIQUE_KEY(allowMultipleRecordsWithNull = false)
-    public Long getCategoryId();
-    public void setCategoryId(Long id);
-    public Category getCategory();
-
-    @Index
-    @UNIQUE_KEY(allowMultipleRecordsWithNull = false)
-    public Long getFulfillmentId();
-    public void setFulfillmentId(Long id);
-    public Fulfillment getFulfillment();
-
-    @Index
-    @UNIQUE_KEY(allowMultipleRecordsWithNull = false)
-    public Long getPaymentId();
-    public void setPaymentId(Long id);
-    public Payment getPayment();
-
-    @Index
-    @UNIQUE_KEY(allowMultipleRecordsWithNull = false)
-    public Long getProviderLocationId();
-    public void setProviderLocationId(Long id);
-    public ProviderLocation getProviderLocation();
-    */
 
 }
