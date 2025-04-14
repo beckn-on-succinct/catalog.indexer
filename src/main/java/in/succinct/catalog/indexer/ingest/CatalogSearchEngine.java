@@ -65,6 +65,7 @@ import java.util.Set;
 import java.util.StringTokenizer;
 import java.util.logging.Level;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @SuppressWarnings("unused")
 public class CatalogSearchEngine {
@@ -622,6 +623,21 @@ public class CatalogSearchEngine {
             if (itemRecords.isEmpty()){
                 replies.addAll(subscriberReplies.values());
                 return;
+            }else if (!providerQuery.isPresent()){
+                Set<Long> providerIds = new HashSet<>();
+                for (in.succinct.catalog.indexer.db.model.Item itemRecord : itemRecords) {
+                    providerIds.add(itemRecord.getProviderId());
+                }
+                StringBuilder qPart = new StringBuilder();
+                providerIds.forEach(id->{
+                    if (!qPart.isEmpty() ){
+                        qPart.append(" ");
+                    }
+                    qPart.append(id);
+                });
+                providerQuery.add("ID", q("%s", qPart.toString(),true).toString());
+                locationQuery.add("PROVIDER_ID", q("%s", qPart.toString(),true).toString());
+                //Restrict to providers being returned.
             }
         }
         
