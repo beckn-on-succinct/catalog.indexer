@@ -173,10 +173,10 @@ public class CatalogSearchEngine {
             addDescriptorMeta(intentDescriptor,intentMeta);
         }else {
             if (provider != null && !ObjectUtil.isVoid(provider.getId())) {
+                providerSpecific.set(true);
                 provider.setId(provider.getId().trim());
                 List<Long> ids = ids(in.succinct.catalog.indexer.db.model.Provider.class,"OBJECT_ID",provider.getId(),true,1);
                 if (!ids.isEmpty()) {
-                    providerSpecific.set(true);
                     intentMeta.add("ID", "%%s:%s".formatted(ids.get(0)));
                 }else {
                     intentMeta.add("ID", "%s:NULL");
@@ -437,9 +437,7 @@ public class CatalogSearchEngine {
         }
     
     }
-    public <M extends Model & IndexedSubscriberModel> List<M> getRecords(Class<M> clazz, Request request,
-                            ObjectHolder<String> environment, int numRecords,IntentMeta... intentQueries){
-        
+    public <M extends Model & IndexedSubscriberModel> StringBuilder getLuceneQuery(Class<M> clazz,IntentMeta... intentQueries){
         Map<Conjunction,List<IntentMeta>> queries = new UnboundedCache<>() {
             @Override
             protected List<IntentMeta> getValue(Conjunction key) {
@@ -491,6 +489,12 @@ public class CatalogSearchEngine {
             q.insert(0, "(");
             q.append(")");
         }
+        return q;
+    }
+    public <M extends Model & IndexedSubscriberModel> List<M> getRecords(Class<M> clazz, Request request,
+                            ObjectHolder<String> environment, int numRecords,IntentMeta... intentQueries){
+        
+        StringBuilder q = getLuceneQuery(clazz,intentQueries);
         
         
         List<Long> ids = new ArrayList<>();
@@ -601,15 +605,40 @@ public class CatalogSearchEngine {
         IntentMeta softItemQuery = getItemQuery(request,Conjunction.OR);
         IntentMeta fulfillmentQuery = getFulfillmentQuery(request);
 
+        boolean requiredToReturnItems =  (providerSpecific.get()  || itemQuery.isPresent() || categoryQuery.isPresent() || softItemQuery.isPresent() );
+        //If any soft query is present all softquery are present. Because all are related to intent.descriptor in a general way and not item.descriptor or provider.descriptor or category.descriptor.
+        
+        List<in.succinct.catalog.indexer.db.model.Item> itemRecords =
+               requiredToReturnItems ?
+                getRecords(in.succinct.catalog.indexer.db.model.Item.class,request,environment,providerSpecific.get()  ? 0 : 50,
+                    providerQuery,softProviderQuery,
+                    locationQuery,
+                    categoryQuery,softCategoryQuery,
+                    fulfillmentQuery,
+                    itemQuery,softItemQuery) :
+                new ArrayList<>();
+        // Dont get items for market places.
+        if (requiredToReturnItems){
+            if (itemRecords.isEmpty()){
+                replies.addAll(subscriberReplies.values());
+                return;
+            }
+        }
+        
+        
         List<in.succinct.catalog.indexer.db.model.ProviderLocation> providerLocationRecords = getRecords(in.succinct.catalog.indexer.db.model.ProviderLocation.class,request,environment,0,
                 locationQuery);
+
+
         List<in.succinct.catalog.indexer.db.model.Provider> providerRecords = getRecords(in.succinct.catalog.indexer.db.model.Provider.class,request,environment,0,
                 locationQuery,
                 providerQuery);
+
         List<in.succinct.catalog.indexer.db.model.Fulfillment> fulfillmentRecords = getRecords(in.succinct.catalog.indexer.db.model.Fulfillment.class,request,environment,0,
                 providerQuery,
                 locationQuery,
                 fulfillmentQuery);
+
         List<in.succinct.catalog.indexer.db.model.Payment> paymentRecords = getRecords(in.succinct.catalog.indexer.db.model.Payment.class,request,environment,0,
                 providerQuery,
                 locationQuery);
@@ -617,13 +646,6 @@ public class CatalogSearchEngine {
                 providerQuery,
                 locationQuery,
                 categoryQuery);
-        List<in.succinct.catalog.indexer.db.model.Item> itemRecords =  ((providerSpecific.get() && !providerRecords.isEmpty()) || itemQuery.isPresent() || categoryQuery.isPresent() || softItemQuery.isPresent() ) ? getRecords(in.succinct.catalog.indexer.db.model.Item.class,request,environment,providerSpecific.get() && !providerRecords.isEmpty() ? 0 : 50,
-                providerQuery,softProviderQuery,
-                locationQuery,
-                categoryQuery,softCategoryQuery,
-                fulfillmentQuery,
-                itemQuery,softItemQuery) : new ArrayList<>();
-        // Dont get items for market places.
         
         
         
