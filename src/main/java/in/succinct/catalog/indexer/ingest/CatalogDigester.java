@@ -245,6 +245,11 @@ public class CatalogDigester implements Task {
                     model.setLocationIds(item.getLocationIds().toString());
                     model.setPaymentIds(item.getPaymentIds().toString());
                     model.setFulfillmentIds(item.getFulfillmentIds().toString());
+                    String itemDomain = item.getTag("domain","id");
+                    if (ObjectUtil.isVoid(itemDomain)){
+                        itemDomain = context.getDomain();
+                    }
+                    model.setDomain(itemDomain);
                 });
 
             }

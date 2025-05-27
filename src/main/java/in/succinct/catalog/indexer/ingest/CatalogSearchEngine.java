@@ -354,6 +354,8 @@ public class CatalogSearchEngine {
         
         intentMeta.add( in.succinct.catalog.indexer.db.model.Item.class,"ID","OBJECT_ID");
         intentMeta.add(in.succinct.catalog.indexer.db.model.Item.class,"NAME","OBJECT_NAME");
+        intentMeta.add(in.succinct.catalog.indexer.db.model.Item.class,"DOMAIN","DOMAIN");
+        
         
         Intent intent = request.getMessage().getIntent();
         Descriptor intentDescriptor = intent == null ? null : intent.getDescriptor();
@@ -369,6 +371,9 @@ public class CatalogSearchEngine {
                 intentMeta.add("ID", "%%s:%s".formatted(item.getId()));
             }
             addDescriptorMeta(itemDescriptor,intentMeta);
+            if (!ObjectUtil.isVoid(request.getContext().getDomain())) {
+                intentMeta.add("DOMAIN", "%%s:%s".formatted(request.getContext().getDomain()));
+            }
         }
 
 
@@ -806,6 +811,7 @@ public class CatalogSearchEngine {
                     outItem.setPaymentIds(new BecknStrings(paymentIds));
                     outItem.setFulfillmentIds(new BecknStrings(fulfillmentIds));
                     outItem.setCategoryIds(new BecknStrings(categoryIds));
+                    outItem.setTag("domain","id",dbItem.getDomain());
                     
                     
                     if (items.get(dbItem.getObjectId()) == null) {

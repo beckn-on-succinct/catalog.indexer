@@ -4,7 +4,7 @@ import com.venky.swf.db.annotations.column.UNIQUE_KEY;
 import com.venky.swf.db.annotations.column.indexing.Index;
 import com.venky.swf.db.model.Model;
 
-public interface Item extends Model,IndexedActivatableModel, HasDescriptor {
+public interface Item extends Model,IndexedActivatableModel, HasDescriptor , IndexedDomainModel{
 
     @Index
     String getCategoryIds();
