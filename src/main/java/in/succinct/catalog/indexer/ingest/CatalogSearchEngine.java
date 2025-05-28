@@ -372,7 +372,7 @@ public class CatalogSearchEngine {
             }
             addDescriptorMeta(itemDescriptor,intentMeta);
             if (!ObjectUtil.isVoid(request.getContext().getDomain())) {
-                intentMeta.add("DOMAIN", "%%s:%s".formatted(request.getContext().getDomain()));
+                intentMeta.add("DOMAIN", "%%s:\"%s\"".formatted(request.getContext().getDomain()));
             }
         }
 
