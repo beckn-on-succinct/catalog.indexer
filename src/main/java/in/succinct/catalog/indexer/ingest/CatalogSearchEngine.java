@@ -532,8 +532,8 @@ public class CatalogSearchEngine {
                         tableName,
                         environment.get()));
             }
-            if (!ObjectUtil.isVoid(request.getContext().getDomain()) ){
-                extra.append(" and exists ( select 1 from items where domain = '%s' and item.provider_id = %s.provider_id)".formatted(request.getContext().getDomain(), tableName));
+            if (!ObjectUtil.isVoid(request.getContext().getDomain()) && !ObjectUtil.equals(clazz.getSimpleName(), in.succinct.catalog.indexer.db.model.Item.class.getSimpleName())){
+                extra.append(" and exists ( select 1 from items where domain = '%s' and items.provider_id = %s.provider_id".formatted(request.getContext().getDomain(), tableName));
                 if (ObjectUtil.equals(clazz.getSimpleName(),ProviderLocation.class.getSimpleName())){
                     extra.append(" and item.location_ids like '%' || ").append("%s.object_id".formatted(tableName)).append(" || '%'");
                 }else if (ObjectUtil.equals(clazz.getSimpleName(), in.succinct.catalog.indexer.db.model.Category.class.getSimpleName())){
