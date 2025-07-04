@@ -536,9 +536,9 @@ public class CatalogSearchEngine {
                 if (!ObjectUtil.equals(clazz.getSimpleName(), in.succinct.catalog.indexer.db.model.Item.class.getSimpleName())){
                     extra.append(" and exists ( select 1 from items where domain = '%s' and items.provider_id = %s.provider_id".formatted(request.getContext().getDomain(), tableName));
                     if (ObjectUtil.equals(clazz.getSimpleName(),ProviderLocation.class.getSimpleName())){
-                        extra.append(" and items.location_ids like '%' || ").append("%s.object_id".formatted(tableName)).append(" || '%'");
+                        extra.append(" and items.location_ids like '%' || ").append("replace(%s.object_id,'./','/')".formatted(tableName)).append(" || '%'");
                     }else if (ObjectUtil.equals(clazz.getSimpleName(), in.succinct.catalog.indexer.db.model.Category.class.getSimpleName())){
-                        extra.append(" and items.category_ids like '%' || ").append("%s.object_id".formatted(tableName)).append(" || '%'");
+                        extra.append(" and items.category_ids like '%' || ").append("replace(%s.object_id,'./','/')".formatted(tableName)).append(" || '%'");
                     }
                     extra.append(")");
                 }else {
