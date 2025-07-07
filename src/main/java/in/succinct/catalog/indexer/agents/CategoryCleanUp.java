@@ -56,7 +56,7 @@ public class CategoryCleanUp extends AgentSeederTask implements AgentSeederTaskB
             if (categoryId > 0) {
                 Category category = Database.getTable(Category.class).get(categoryId);
                 Config.instance().getLogger(getClass().getName()).info("Deleting %d".formatted(categoryId));
-                //category.destroy();
+                category.destroy();
             }
         }
     }
