@@ -48,6 +48,7 @@ import in.succinct.beckn.Subscriber;
 import in.succinct.beckn.TagGroup;
 import in.succinct.beckn.TagGroups;
 import in.succinct.beckn.Time;
+import in.succinct.catalog.indexer.db.model.IndexedActivatableModel;
 import in.succinct.catalog.indexer.db.model.IndexedProviderModel;
 import in.succinct.catalog.indexer.db.model.IndexedSubscriberModel;
 import in.succinct.catalog.indexer.db.model.ProviderLocation;
@@ -519,6 +520,10 @@ public class CatalogSearchEngine {
         Expression where = new Expression(sel.getPool(), Conjunction.AND);
         where.add(new Expression(sel.getPool(), "SUBSCRIBER_ID", Operator.IN, subscriberMap.keySet().toArray(new String[]{})));
         where.add(Expression.createExpression(sel.getPool(), "ID", Operator.IN, ids.toArray()));
+        if (numRecords > 0 && IndexedActivatableModel.class.isAssignableFrom(clazz)){
+            // Limited numbr of records requested.
+            where.add(new Expression(sel.getPool(),"ACTIVE",Operator.EQ,true));
+        }
         sel.where(where);
         
         StringBuilder extra = new StringBuilder();
@@ -869,13 +874,22 @@ public class CatalogSearchEngine {
                                 if (end != null && end.getLocation() != null && end.getLocation().getGps() != null) {
                                     for (String fId: outItem.getFulfillmentIds()) {
                                         in.succinct.beckn.Fulfillment fulfillment = fulfillments.get(fId);
+                                        double distance = storeLocation.getGps().distanceTo(end.getLocation().getGps());
+                                        boolean queriedAtStore = (providerSpecific.get() && distance == 0);
+                                        
                                         if (RetailFulfillmentType.valueOf(fulfillment.getType()) == RetailFulfillmentType.store_pickup) {
-                                            includeItem = true;
+                                            if (queriedAtStore) {
+                                                includeItem = true; //Seller doing query
+                                            }else {
+                                                includeItem = dbItem.isActive();
+                                            }
                                         } else if (RetailFulfillmentType.valueOf(fulfillment.getType()) == RetailFulfillmentType.home_delivery){
                                             Circle circle = storeLocation.getCircle();
-                                            if (providerSpecific.get() || circle == null) {
-                                                includeItem = true;
-                                            } else {
+                                            if (queriedAtStore) {
+                                                includeItem = true; //Seller doing query.
+                                            } else if (circle == null){
+                                                includeItem = dbItem.isActive();
+                                            }else {
                                                 if (circle.getGps() == null) {
                                                     circle.setGps(storeLocation.getGps());
                                                 }
@@ -894,10 +908,7 @@ public class CatalogSearchEngine {
                                                 if (!radius.getUnit().equalsIgnoreCase("km")) {
                                                     radiusValue = convertDistanceToKm(radiusValue, radius.getUnit());
                                                 }
-                                                double distance = circle.getGps().distanceTo(end.getLocation().getGps());
-                                                if (distance == 0) {
-                                                    includeItem = true; //This is to show inactive items for sellers who query by store location.
-                                                } else if (distance <= radiusValue) {
+                                                if (distance <= radiusValue) {
                                                     includeItem = dbItem.isActive();
                                                 }
                                             }
@@ -908,7 +919,7 @@ public class CatalogSearchEngine {
                                     }
                                     
                                 } else if (end == null && storeInCity) {
-                                    includeItem = true;
+                                    includeItem = dbItem.isActive();
                                 }
                                 if (includeItem ) {
                                     if (items.get(outItem.getId()) == null) {
