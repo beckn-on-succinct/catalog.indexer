@@ -7,10 +7,6 @@ import com.venky.swf.db.JdbcTypeHelper.TypeConverter;
 import com.venky.swf.db.model.Model;
 import com.venky.swf.plugins.background.core.Task;
 import com.venky.swf.routing.Config;
-import com.venky.swf.sql.Conjunction;
-import com.venky.swf.sql.Expression;
-import com.venky.swf.sql.Operator;
-import com.venky.swf.sql.Select;
 import in.succinct.beckn.BecknObject;
 import in.succinct.beckn.BecknStrings;
 import in.succinct.beckn.Catalog;
@@ -30,13 +26,11 @@ import in.succinct.beckn.Provider;
 import in.succinct.beckn.Providers;
 import in.succinct.beckn.TagGroup;
 import in.succinct.beckn.TagGroupHolder;
-import in.succinct.beckn.Xinput.Index;
 import in.succinct.catalog.indexer.db.model.HasDescriptor;
 import in.succinct.catalog.indexer.db.model.IndexedActivatableModel;
 import in.succinct.catalog.indexer.db.model.IndexedProviderModel;
 import in.succinct.catalog.indexer.db.model.ProviderLocation;
 import in.succinct.catalog.indexer.db.model.ProviderTag;
-import org.apache.poi.sl.draw.geom.GuideIf.Op;
 import org.json.simple.JSONObject;
 
 import java.util.HashMap;
@@ -157,18 +151,8 @@ public class CatalogDigester implements Task {
 
         provider = Database.getTable(in.succinct.catalog.indexer.db.model.Provider.class).getRefreshed(provider);
         provider.save();
+        provider.getProviderTags().forEach(providerTag -> providerTag.destroy()); //Tags to be reset.
         for (TagGroup group : bProvider.getTags()){
-            Select select = new Select().from(ProviderTag.class);
-            select.where(new Expression(select.getPool(), Conjunction.AND).
-                    add(new Expression(select.getPool(),"PROVIDER_ID", Operator.EQ,provider.getId())).
-                    add(new Expression(select.getPool(),"TAG_GROUP_CODE",Operator.EQ,group.getId())));
-            for (ProviderTag m : select.execute(ProviderTag.class)) {
-                if (m.getProviderId() == provider.getId()) {
-                    //Defeensive. To make sure sql bugs don't cause accidents.
-                    m.destroy();
-                }
-            } // tags always in reset mode.
-            
             for (TagGroup tag : group.getList()){
                 ProviderTag providerTag = Database.getTable(ProviderTag.class).newRecord();
                 providerTag.setProviderId(provider.getId());
