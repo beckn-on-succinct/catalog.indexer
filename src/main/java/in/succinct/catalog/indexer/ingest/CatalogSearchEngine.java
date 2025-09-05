@@ -299,8 +299,20 @@ public class CatalogSearchEngine {
                 locationIds.add(providerLocation.getObjectId());
                 providerIds.add(providerLocation.getProviderId());
             }
+            if (location.getCircle() == null){
+                location.setCircle(new Circle(){{
+                    setRadius(new Scalar(){{
+                        setValue(10);
+                        setUnit("km");
+                    }});
+                }});
+            }
+            if (location.getCircle().getRadius().getUnit() == null){
+                location.getCircle().getRadius().setUnit("km");
+            }
 
-            BoundingBox bb  = new BoundingBox(coordinate,1,10); //Hardcoded buyer geo fence 10 kms
+            BoundingBox bb  = new BoundingBox(coordinate,1,
+                    convertDistanceToKm(location.getCircle().getRadius().getValue(),location.getCircle().getRadius().getUnit())); //Hardcoded buyer geo fence 10 kms
             List<ProviderLocation> buyerGeoFenceBasedList = bb.find(ProviderLocation.class,0);
 
             Map<Long,Set<String>> closeByProviderLocationMap = new UnboundedCache<>() {

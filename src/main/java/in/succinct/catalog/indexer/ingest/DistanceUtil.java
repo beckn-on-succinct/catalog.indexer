@@ -12,7 +12,10 @@ public class DistanceUtil {
     }};
 
     public static double convertDistanceToKm(double distance, String fromUnit) {
-        double f = conversionFactor.get(StringUtil.singularize(fromUnit).toLowerCase());
+        Double f = conversionFactor.get(StringUtil.singularize(fromUnit == null ? "km" : fromUnit).toLowerCase());
+        if (f == null){
+            throw new RuntimeException("Please specifify distance in miles or kms");
+        }
         return f * distance;
     }
 
