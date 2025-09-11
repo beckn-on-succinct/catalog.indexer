@@ -271,6 +271,7 @@ public class CatalogSearchEngine {
         IntentMeta locationQ = new IntentMeta();
         
         locationQ.add(in.succinct.catalog.indexer.db.model.ProviderLocation.class,"LOCATION_ID","OBJECT_ID");
+        locationQ.add(in.succinct.catalog.indexer.db.model.ProviderLocation.class,"PROVIDER_ID","PROVIDER_ID");
         
         locationQ.add(in.succinct.catalog.indexer.db.model.Provider.class,"PROVIDER_ID","ID");
         locationQ.add(in.succinct.catalog.indexer.db.model.Category.class,"PROVIDER_ID","PROVIDER_ID");
